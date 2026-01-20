@@ -28,7 +28,7 @@ with open('blockades_symmetric.pkl', 'rb') as file:
 
 
 def find_blockade_Mrad(atom_name, n, d):
-    blockades = blockade_dict['Cs'][str(n)]
+    blockades = blockade_dict[atom_name][str(n)]
     b_r = [l[0] for l in blockades]
     b_values = [l[1] for l in blockades]
     b = np.interp(d, b_r, b_values)
@@ -86,9 +86,10 @@ class Hamiltonians:
         self.decay_rate = (1 / self.r_lifetime) / self.Omega_Rabi1
         self.decay_rate2 = (1 / self.r_lifetime2) / self.Omega_Rabi1
 
-    def H11(self, phase_i, omega_scale: float = 1.0):
+    def H11(self, phase_i, omega1_scale: float = 1.0, omega2_scale: float = 1.0):
         """Two-atom Hamiltonian at a given phase (Hermitian)."""
-        Omega1 = omega_scale * np.exp(1j * phase_i) / 2
+        Omega1 = omega1_scale * np.exp(1j * phase_i) / 2
+        Omega2 = omega2_scale * np.exp(1j * phase_i) / 2
         Delta1 = self.Delta1 / self.Omega_Rabi1
         Stark1 = self.Stark1 / self.Omega_Rabi1
         Stark2 = self.Stark2 / self.Omega_Rabi1
@@ -101,10 +102,10 @@ class Hamiltonians:
         else:
             B = self.normalized_blockade
             H = np.array([
-                [0, Omega1, Omega1, 0],
-                [np.conj(Omega1), Delta1 + Stark1, 0, Omega1],
-                [np.conj(Omega1), 0, Delta1 + Stark2, Omega1],
-                [0, np.conj(Omega1), np.conj(Omega1), 2 * Delta1 + Stark1 + Stark2 + B],
+                [0, Omega1, Omega2, 0],
+                [np.conj(Omega1), Delta1 + Stark1, 0, Omega2],
+                [np.conj(Omega2), 0, Delta1 + Stark2, Omega1],
+                [0, np.conj(Omega2), np.conj(Omega1), 2 * Delta1 + Stark1 + Stark2 + B],
 
             ], complex)
             decay_matrix = np.diag([0, self.decay_rate, self.decay_rate2, self.decay_rate + self.decay_rate2])
@@ -124,24 +125,46 @@ class Hamiltonians:
         H += decay_matrix
         return H
 
+
     @staticmethod
-    def bell_state_fidelity(psi01, psi11):
-        """Compute Bell state fidelity from single- and two-atom amplitudes."""
-        return (1 / 16) * np.abs(1 + 2 * psi01[0] - psi11[0]) ** 2  # bell state fidelity
+    def bell_state_fidelity(psi10, psi01, psi11):
+        return (1 / 16) * np.abs(1 + psi01[0] + psi10[0] - psi11[0]) ** 2  # bell state fidelity
+
+
+    def asym_return_fidel(self, phases=None, dt=None, omega1_scale=1, omega2_scale=1):
+        psi01 = self.initial_psi01.copy()
+        psi10 = self.initial_psi01.copy()
+        psi11 = self.initial_psi11.copy()
+        for phi in phases:
+            U01 = scipy.linalg.expm(-1j * self.H01(phi, omega_scale=omega1_scale) * dt)
+            U10 = scipy.linalg.expm(-1j * self.H01(phi, omega_scale=omega2_scale) * dt)
+            U11 = scipy.linalg.expm(-1j * self.H11(phi, omega1_scale=omega1_scale, omega2_scale= omega2_scale) * dt)
+            psi01 = U01 @ psi01
+            psi10 = U10 @ psi10
+            psi11 = U11 @ psi11
+        # remove global phase
+        gp1 = psi01[0] / np.abs(psi01[0])
+        gp2 = psi10[0] / np.abs(psi10[0])
+        psi01 /= gp1
+        psi10 /= gp2
+        psi11 /= gp1
+        psi11 /= gp2
+        return self.bell_state_fidelity(psi10, psi01, psi11), (gp1,gp2)  # returns [fidelity, rotation_phase]
+
 
     def return_fidel(self, phases=None, dt=None, omega_scale=1):
         psi01 = self.initial_psi01.copy()
         psi11 = self.initial_psi11.copy()
         for phi in phases:
             U01 = scipy.linalg.expm(-1j * self.H01(phi, omega_scale=omega_scale) * dt)
-            U11 = scipy.linalg.expm(-1j * self.H11(phi, omega_scale=omega_scale) * dt)
+            U11 = scipy.linalg.expm(-1j * self.H11(phi, omega1_scale=omega_scale, omega2_scale= omega_scale) * dt)
             psi01 = U01 @ psi01
             psi11 = U11 @ psi11
         # remove global phase
         gp = psi01[0] / np.abs(psi01[0])
         psi01 /= gp
         psi11 /= gp ** 2
-        return self.bell_state_fidelity(psi01, psi11), gp  # returns [fidelity, rotation_phase]
+        return self.bell_state_fidelity(psi01, psi01, psi11), gp  # returns [fidelity, rotation_phase]
 
 
 def fid_optimize(param, fid_gen):
@@ -249,6 +272,35 @@ def sample_gaussian(std, rng=None):
         rng = np.random.default_rng()
     return rng.normal(loc=0.0, scale=std)
 
+
+def relative_gaussian_beam_intensity(x, y, z, w0, wavelength):
+    """
+    Relative intensity I(x,y,z) / I(0,0,0) for a Gaussian beam.
+
+    Parameters
+    ----------
+    x, y, z : float or array-like
+        Position coordinates (meters). Beam propagates along +z.
+    w0 : float
+        Beam waist radius at z=0 (meters), defined at 1/e^2 intensity.
+    wavelength : float
+        Beam wavelength (meters).
+
+    Returns
+    -------
+    rel_I : float or np.ndarray
+        Relative intensity normalized to the on-axis waist-center intensity.
+    """
+    x = np.asarray(x)
+    y = np.asarray(y)
+    z = np.asarray(z)
+
+    zr = np.pi * w0**2 / wavelength             # Rayleigh range
+    w_z = w0 * np.sqrt(1.0 + (z / zr)**2)       # beam radius vs z
+
+    r2 = x**2 + y**2
+    rel_I = (w0 / w_z)**2 * np.exp(-2.0 * r2 / (w_z**2))
+    return rel_I
 
 
 if __name__ == "__main__":
