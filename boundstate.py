@@ -1,6 +1,7 @@
 import numpy as np
 from dataclasses import dataclass
 from scipy import integrate, constants
+
 from arc import *
 import matplotlib.pyplot as plt
 # =========================
@@ -284,7 +285,7 @@ def solve_bound_state_nodegated(
 
         i_match = choose_match_index_by_rms(
             uo, ui, r, i_turn,
-            w_match=250,  # search ±250 points around turning point
+            w_match=150,  # search ±250 points around turning point
             w_rms=40,  # RMS window for mismatch
             k2=k2  # restrict to k2>0 (allowed region)
         )
@@ -304,7 +305,7 @@ def solve_bound_state_nodegated(
     for frac_span in [0.35, 0.60, 0.90]:
         try:
             E_a, E_b = energy_scan_node_window(n, l, delta0, Vef, r, i_turn,
-                                               frac_span=frac_span, nE=500)
+                                               frac_span=frac_span, nE=1000)
             break
         except RuntimeError as e:
             last_err = e
@@ -428,14 +429,14 @@ def solve_bound_state_nodegated(
 if __name__ == "__main__":
     # Example: Rb nP3/2 quantum defect delta0 (Rb85) ~ 2.6416737
     # Use the correct delta0 for your isotope/series if needed.
-    lr = 1
+    lr = 0
     jr = 1/2
 
-    for n in [20]:
+    for n in [6]:
         defect = atom.getQuantumDefect(n=n, l=lr, j=jr)
         st = solve_bound_state_nodegated(
             n=n, l=lr, j=jr, delta0=defect,
-            r_min=1e-3, r_max=4*n**2, h=1/4/n
+            r_min=1e-3, r_max=4*n**2, h=0.001
         )
         print(f"Rb {n}P3/2 bound state")
         print(f"  Energy E = {st.E_au:.8e} Ha = {st.E_au*Eh/constants.h:.3e} Hz (in frequency units)")
