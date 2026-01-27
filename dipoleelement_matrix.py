@@ -54,7 +54,7 @@ def V_eff_so(r: np.ndarray, l: int, j: float) -> np.ndarray:
     """V_eff = V + l(l+1)/(2r^2) + V_so."""
     rr = np.maximum(r, 1e-12)
     Vcent = l*(l+1.0) / (2.0 * rr**2)
-    return V_marinescu(r, l) + Vcent + V_so(r, l, j)
+    return V_marinescu(r, l) + Vcent# + V_so(r, l, j)
 
 
 def V_eff(r, l):
@@ -139,7 +139,7 @@ if __name__ == "__main__":
     print("E_found  (au) =", st_g.E_au)
     print("norm ∫u^2dr =", integrate.simpson(st_g.u*st_g.u, st_g.r_a0))
 
-    ne, le, je = 7, 1, 0.5
+    ne, le, je = 7, 1, 1.5
     Ee_target_eV = atom.getEnergy(ne, le, je)          # ARC: energy in cm^-1 relative to ionization limit (usually negative)
     Ee_target_au = (Ee_target_eV * constants.e) /  constants.physical_constants["Hartree energy"][0]
     st_e = solve_bound_state_fd(

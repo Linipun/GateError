@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 # =========================
 Eh = constants.physical_constants["Hartree energy"][0]   # J
 a0 = constants.physical_constants["Bohr radius"][0]      # m
-
+alpha_fs = constants.alpha  # fine-structure constant
 # =========================
 # Rb Marinescu model potential (ARC Rubidium85 parameters)
 # r in a0, V in Hartree (atomic units)
@@ -34,9 +34,27 @@ def V_marinescu_rb(r, l):
     Vpol = -(RB_alphaC/(2.0*r**4))*(1.0 - np.exp(-(r/rc)**6))
     return Vc + Vpol
 
-def V_eff(r, l):
+def ls_expectation(l: int, j: float) -> float:
+    """<L·S> for s=1/2 (atomic units, i.e. ħ=1)."""
+    return 0.5 * (j*(j+1.0) - l*(l+1.0) - 0.75)
+
+def V_so(r: np.ndarray, l: int, j: float) -> np.ndarray:
+    """
+    Breit–Pauli (Pauli) spin-orbit:
+      V_so(r) = (alpha^2/2) * (1/r) * dV/dr * <L·S>
+    where V is the CENTRAL potential V_marinescu_cs(r,l) (not including centrifugal).
+    r in a0, V in Hartree.
+    """
+
+    V = V_marinescu_rb(r, l)  # <-- your existing central potential
+    dVdr = np.gradient(V, r, edge_order=2)
+    rr = np.maximum(r, 1e-12)
+    return 0.5 * (alpha_fs**2) * (dVdr / rr) * ls_expectation(l, j)
+
+
+def V_eff(r, l, j):
     """Effective potential for u(r)=rR(r): V(r) + l(l+1)/(2r^2)."""
-    return V_marinescu_rb(r, l) + l*(l+1)/(2.0*r**2)
+    return V_marinescu_rb(r, l) + l*(l+1)/(2.0*r**2)+ V_so(r, l, j)
 
 # =========================
 # Numerov integrators with rescaling
@@ -264,7 +282,7 @@ def solve_bound_state_nodegated(
         raise ValueError("Need n > l.")
 
     r = np.arange(r_min, r_max + h, h)
-    Vef = V_eff(r, l)
+    Vef = V_eff(r, l, j)
     target_nodes = n - l - 1
 
     # QDT energy guess for turning point location
