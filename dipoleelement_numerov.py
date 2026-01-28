@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from scipy import integrate, constants, optimize
 from arc import *
 import matplotlib.pyplot as plt
+import sys
+import os
 # =========================
 # Cs Marinescu/ARC model potential parameters (same form as before)
 # r in a0, V in Hartree
@@ -140,8 +142,9 @@ def solve_bound_numerov_ground(
     Vef = V_eff(r, l, j)  # or V_eff(r,l) if no SO
     i_turn = int(np.argmin(np.abs(Vef - E0)))
     r_turn = r[i_turn]
+    # r_match = 5
     r_match = max(0.8 * r_turn, 5)
-
+    print('r match:', r_match)
     i_match = int(np.argmin(np.abs(r - r_match)))
     i_match = max(2+w_rms, min(len(r)-3-w_rms, i_match))
 
@@ -199,35 +202,58 @@ def radial_dipole_length(ua, ub, r):
 if __name__ == "__main__":
     # Solve Cs 6S and 7P on the SAME grid for clean integration
     # Low-n requires finer h than Rydberg states; start with h=1e-3, r_max~600 a0
+
     r_min = 1e-6
-    r_max = 200.0
-    h = 0.0001
+    n =  int(sys.argv[1])
+    r_max = max(100,8*n**2)
+    h = min(0.001,1/8/n)
+    print(f'h={h}, r_min={r_min}, r_max={r_max}')
+    # folder = 'results'
+    # os.makedirs(folder, exist_ok=True)
+
 
     s6 = solve_bound_numerov_ground(n=6, l=0, j=0.5, r_min=r_min, r_max=r_max, h=h)
-    p7 = solve_bound_numerov_ground(n=7, l=1, j=0.5, r_min=r_min, r_max=r_max, h=h)
+    np12 = solve_bound_numerov_ground(n=n, l=1, j=0.5, r_min=r_min, r_max=r_max, h=h)
 
     # Radial integral in atomic units (a0), i.e. in units of ea0 for the dipole operator
-    R = radial_dipole_length(s6.u, p7.u, s6.r)
+    R12 = radial_dipole_length(s6.u, np12.u, s6.r)
 
     # Fine-structure reduced matrix elements (alkali S1/2 -> PJ)
-    d_7p12 = np.sqrt(2.0/3.0) * R  # in ea0
-    d_7p32 = np.sqrt(4.0/3.0) * R  # in ea0
+    d_np12 = -np.sqrt(2.0/3.0) * R12  # in ea0
 
-    # Convert ea0 to SI (C·m)
-    ea0_SI = constants.e * constants.physical_constants["Bohr radius"][0]
-    d_7p12_SI = d_7p12 * ea0_SI
-    d_7p32_SI = d_7p32 * ea0_SI
-    fig, ax = plt.subplots(ncols=2)
+    fig, ax = plt.subplots(ncols=3)
     ax[0].plot(s6.r, s6.u)
-    ax[1].plot(p7.r, p7.u)
-    fig.show()
+    ax[1].plot(np12.r, np12.u)
+    ax[0].set_xlim([0,50])
+    ax[0].set_title('$6S_{1/2}$')
+    ax[1].set_title(f'${n}S_{1/2}$')
+
+    np32 = solve_bound_numerov_ground(n=n, l=1, j=1.5, r_min=r_min, r_max=r_max, h=h)
+
+    # Radial integral in atomic units (a0), i.e. in units of ea0 for the dipole operator
+    R32 = radial_dipole_length(s6.u, np32.u, s6.r)
+
+    # Fine-structure reduced matrix elements (alkali S1/2 -> PJ)
+    d_np32 = np.sqrt(4.0 / 3.0) * R32  # in ea0
     print("Cs bound energies (model) [Hartree]:")
     print(f"  E(6S) = {s6.E_au:.8e} Ha")
-    print(f"  E(7P) = {p7.E_au:.8e} Ha")
+    print(f"  E({n}P1/2) = {np12.E_au:.8e} Ha")
+    print(f"  E({n}P3/2) = {np32.E_au:.8e} Ha")
     print()
-    print("Radial integral R = <6S|r|7P> (length gauge):")
-    print(f"  R = {R:.6f}  (in a0, i.e. ea0 for dipole)")
+    print(f"Radial integral R = <6S|r|{n}P> (length gauge):")
+    print(f"  R12 = {R12:.6f}  (in a0, i.e. ea0 for dipole)")
+    print(f"  R32 = {R32:.6f}  (in a0, i.e. ea0 for dipole)")
     print()
     print("Reduced dipole matrix elements (fine structure):")
-    print(f"  <6S1/2 || d || 7P1/2> = {d_7p12:.6f} ea0  = {d_7p12_SI:.6e} C·m")
-    print(f"  <6S1/2 || d || 7P3/2> = {d_7p32:.6f} ea0  = {d_7p32_SI:.6e} C·m")
+    print(f"  <6S1/2 || d || {n}P1/2> = {d_np12:.6f} ea0")
+    print(f"  <6S1/2 || d || {n}P3/2> = {d_np32:.6f} ea0")
+
+    # fig, ax = plt.subplots()
+    # r = np.linspace(1.0, 100.0, 1000)
+    # V = V_eff(r,l=1,j=1.5)
+    # ax.plot(r,V)
+    # E = arc_energy_to_Ha(atom, n=7, l=1, j=1.5)
+    # ax.axhline(E, color='k')
+    # ax.set_yscale('log')
+    # fig.show()
+    # # fig.savefig(os.path.join(folder,'Wavefunction.pdf'))
