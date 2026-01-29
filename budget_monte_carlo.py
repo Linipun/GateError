@@ -34,6 +34,25 @@ def find_blockade_Mrad(atom_name, n, d):
     b = np.interp(d, b_r, b_values)
     return b * 1e3 * 2 * np.pi
 
+def gv(f):
+    "Linear response for TO gate and frequency noise"
+    a = 2.910
+    b = -0.02715
+    c = 0.5874
+    d = 3.022
+    e = 1.179
+    g = 0.5337
+    return a*np.exp(-((f-b)/c)**2)+d*np.exp(-((f-e)/g)**2)
+
+def gi(f):
+    "Linear response for TO gate and Intensity noise"
+    a = 1.187
+    b = 6.423
+    c = 0.7670
+    d = 0.07678
+    e = 5.528
+    g =0.2381
+    return a*(1+d*np.tanh(e*(f-g)))/(1+np.exp(b*(f-c)))
 
 class Hamiltonians:
     """
@@ -303,6 +322,15 @@ def relative_gaussian_beam_intensity(x, y, z, w0, wavelength):
     return rel_I
 
 
+def db_to_w(db):
+    # Convert from db to Watt
+    return 10**(db/10)
+
+
+def w_to_db(db):
+    # Convert from watt to db
+    return 10*np.log10(db)
+
 if __name__ == "__main__":
     outdirs ='results'
     os.makedirs(outdirs, exist_ok=True)
@@ -325,6 +353,10 @@ if __name__ == "__main__":
     w0_trap = 1.2  # um
 
     num_samples = 100
+
+    phase_noise_csv = "638-narrower-scan_28-7-2025.csv"
+    RIN_csv_path = 'UV_Intensity_Nov25.csv'
+    intensity_DC_V = 10.105
 
     ## configuration ##
 
