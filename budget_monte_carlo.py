@@ -331,6 +331,186 @@ def w_to_db(db):
     # Convert from watt to db
     return 10*np.log10(db)
 
+
+def plot_error_budget(
+    components,          # dict: {"Decay": val, "Frequency": val, ...} in absolute infidelity units (e.g. 1e-3)
+    component_err=None,  # dict: {"Decay": std, ...} same units; optional
+    experiment=None,     # float, experimental infidelity (same units); optional
+    experiment_label=None,  # str label in the plot; optional
+    omega_label=r"$\Omega = 2\pi \times 7.7~\mathrm{MHz}$",
+    title=None,
+    savepath=None,
+):
+    """
+    Creates an error budget bar plot similar to your example.
+
+    Notes:
+    - Values should be absolute infidelity numbers (e.g. 1.0e-3, 2.5e-4, ...).
+    - "Total" will be computed and appended if not provided.
+    - component_err can be omitted; if provided, error bars are shown.
+    """
+
+    # Order (match your example)
+    # order = ["Decay", "Frequency", "Intensity", "Motional"]
+    # Add any extra keys (optional)
+    extras = [k for k in components.keys()]
+    labels = extras
+
+    # Build totals if missing
+    total = components.get("Total", sum(components.get(k, 0.0) for k in labels))
+    components_plot = {**components, "Total": total}
+
+    labels = labels + ["Total"]
+    y = np.array([components_plot.get(k, 0.0) for k in labels], dtype=float)
+
+    # Error bars
+    if component_err is None:
+        yerr = None
+    else:
+        # If Total error not given, combine by quadrature (common), else use provided
+        total_err = component_err.get(
+            "Total",
+            np.sqrt(sum((component_err.get(k, 0.0))**2 for k in labels if k != "Total"))
+        )
+        yerr = np.array([component_err.get(k, 0.0) for k in labels[:-1]] + [total_err], dtype=float)
+
+    # Colors (roughly like the sample)
+    colors = ["#b06ae2", "#4e63ff", "#ff4da6", "#ff9f1a", "#ff3b30"]
+
+    fig, ax = plt.subplots(figsize=(4.2, 3.4), dpi=150)
+
+    x = np.arange(len(labels))
+    bar_kwargs = dict(width=0.72, edgecolor="black", linewidth=0.8, alpha=0.65)
+    ax.bar(x, y, color=colors[:len(labels)], **bar_kwargs)
+
+    if yerr is not None:
+        ax.errorbar(x, y, yerr=yerr, fmt="none", ecolor="black", elinewidth=1.0, capsize=3)
+
+    # Experimental reference line
+    if experiment is not None:
+        ax.axhline(experiment, linestyle="--", linewidth=1.3, color="#1f77b4")
+        if experiment_label is None:
+            experiment_label = rf"Experiment {experiment:.2g}"
+        ax.text(
+            0.05, 0.93, experiment_label,
+            transform=ax.transAxes, ha="left", va="top",
+            color="#1f77b4", fontsize=9, fontweight="bold"
+        )
+
+    # Omega label inside the axes
+    if omega_label:
+        ax.text(
+            0.05, 0.78, omega_label,
+            transform=ax.transAxes, ha="left", va="top",
+            fontsize=9, color="black"
+        )
+
+    # Axis formatting (show ×10^-3 style)
+    ax.set_ylabel("Infidelity")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=35, ha="right")
+    ax.tick_params(axis="both", which="major", labelsize=9)
+    ax.ticklabel_format(axis="y", style="sci", scilimits=(-3, -3), useMathText=True)  # force ×10^-3 if in that ballpark
+    ax.set_yscale('log')
+    # Limits & grid
+    ax.grid(axis="y", alpha=0.25)
+    ax.set_axisbelow(True)
+
+    if title:
+        ax.set_title(title, fontsize=10)
+
+    fig.tight_layout()
+
+    if savepath:
+        fig.savefig(savepath, bbox_inches="tight")
+    return fig, ax
+
+
+def plot_budget_delta_hatched(
+        optimized: dict,
+        baseline: dict,
+        order,
+        omega_label=None,
+        title=None,
+        savepath=None,
+):
+    labels = list(order)
+    y_opt = np.array([optimized.get(k, np.nan) for k in labels], float)
+    y_base = np.array([baseline.get(k, np.nan) for k in labels], float)
+    y_base_bottom = []
+    for k in labels:
+        if optimized.get(k, np.nan) == baseline.get(k, np.nan):
+            y_base_bottom.append(optimized.get(k, np.nan))
+        else:
+            y_base_bottom.append(optimized.get(k, np.nan) * 1.1)
+    # For log plots: require strictly positive heights
+    # If something is truly zero, decide a floor or omit it. Here we floor tiny values.
+    eps = 1e-30
+    y_opt = np.where(np.isfinite(y_opt) & (y_opt > 0), y_opt, eps)
+    y_base = np.where(np.isfinite(y_base) & (y_base > 0), y_base, eps)
+
+    # Cap only where baseline > optimized
+    cap = np.clip(y_base - y_opt, 0, None)
+
+    # Colors per category (same as your earlier palette vibe)
+    colors = ["#b06ae2", "#4e63ff", "#ff4da6", "#ff9f1a",
+              "#2ecc71", "#7f8c8d", "#4e63ff"][:len(labels)]
+
+    x = np.arange(len(labels))
+    fig, ax = plt.subplots(figsize=(5, 5), dpi=150)
+
+    # Optimized: solid filled bars
+    ax.bar(
+        x, y_opt,
+        width=0.65,
+        color=colors,
+        alpha=0.75,
+        edgecolor="black",
+        linewidth=0.9,
+        label="Optimized",
+        zorder=2
+    )
+
+    # Baseline cap: hatched + dotted outline, starts at top of optimized
+    ax.bar(
+        x, cap,
+        bottom=y_base_bottom,
+        width=0.65,
+        facecolor=colors,
+        alpha=0.1,
+        edgecolor="black",
+        linewidth=1.2,
+        hatch="///",
+        label="Baseline",
+        zorder=3
+    )
+
+    # Axes formatting (log)
+    ax.set_yscale("log")
+    ymin = min(np.min(y_opt[y_opt > 0]), np.min(y_base[y_base > 0])) / 2
+    ymax = max(np.max(y_opt), np.max(y_base)) * 2
+    ax.set_ylim(ymin, ymax)
+
+    ax.set_ylabel("Infidelity")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=35, ha="right")
+
+    # ax.grid(axis="y", which="both", alpha=0.25)
+    ax.set_axisbelow(True)
+    ax.legend(frameon=False, loc="upper right")
+
+    if omega_label:
+        ax.text(0.05, 0.88, omega_label, transform=ax.transAxes,
+                ha="left", va="top", fontsize=9)
+
+    if title:
+        ax.set_title(title, fontsize=10)
+
+    fig.tight_layout()
+    if savepath:
+        fig.savefig(savepath, bbox_inches="tight")
+    return fig, ax
+
 if __name__ == "__main__":
     outdirs ='results'
     os.makedirs(outdirs, exist_ok=True)

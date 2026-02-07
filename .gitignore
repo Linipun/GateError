@@ -1,0 +1,8 @@
+*.csv
+/phases.npy
+/gate_params_no_MC.pkl
+*.jpg
+*.png
+*.pdf
+*.pptx
+50p_blockade_vals.txt

@@ -143,7 +143,7 @@ def solve_bound_numerov_ground(
     i_turn = int(np.argmin(np.abs(Vef - E0)))
     r_turn = r[i_turn]
     # r_match = 5
-    r_match = max(0.8 * r_turn, 5)
+    r_match = max(0.8 * r_turn, 10)
     print('r match:', r_match)
     i_match = int(np.argmin(np.abs(r - r_match)))
     i_match = max(2+w_rms, min(len(r)-3-w_rms, i_match))
@@ -182,9 +182,10 @@ def solve_bound_numerov_ground(
     u[:i0] = uo[:i0]
     u[i1+1:] = ui[i1+1:]
     u[i0:i1+1] = (1-w)*uo[i0:i1+1] + w*ui[i0:i1+1]
-
+    normalized = integrate.simpson(u * u, r)
+    print('normalized:', normalized, 'max:', np.max(u), E_best)
     # normalize
-    u /= np.sqrt(integrate.simpson(u*u, r))
+    u /= np.sqrt(normalized)
     return BoundState(
         n=n, l=l, j=j,
         r=r,
@@ -205,18 +206,19 @@ if __name__ == "__main__":
 
     r_min = 1e-6
     n =  int(sys.argv[1])
-    r_max = max(100,8*n**2)
+    r_max = max(600,8*n**2)
     h = min(0.001,1/8/n)
     print(f'h={h}, r_min={r_min}, r_max={r_max}')
     # folder = 'results'
     # os.makedirs(folder, exist_ok=True)
 
 
-    s6 = solve_bound_numerov_ground(n=6, l=0, j=0.5, r_min=r_min, r_max=r_max, h=h)
+    s6 = solve_bound_numerov_ground(n=6, l=0, j=0.5, r_min=r_min, r_max=600, h=h)
     np12 = solve_bound_numerov_ground(n=n, l=1, j=0.5, r_min=r_min, r_max=r_max, h=h)
 
+    up12_on_rg = np.interp(s6.r, np12.r, np12.u)
     # Radial integral in atomic units (a0), i.e. in units of ea0 for the dipole operator
-    R12 = radial_dipole_length(s6.u, np12.u, s6.r)
+    R12 = radial_dipole_length(s6.u, up12_on_rg, s6.r)
 
     # Fine-structure reduced matrix elements (alkali S1/2 -> PJ)
     d_np12 = -np.sqrt(2.0/3.0) * R12  # in ea0
@@ -229,9 +231,9 @@ if __name__ == "__main__":
     ax[1].set_title(f'${n}S_{1/2}$')
 
     np32 = solve_bound_numerov_ground(n=n, l=1, j=1.5, r_min=r_min, r_max=r_max, h=h)
-
+    up32_on_rg = np.interp(s6.r, np32.r, np32.u)
     # Radial integral in atomic units (a0), i.e. in units of ea0 for the dipole operator
-    R32 = radial_dipole_length(s6.u, np32.u, s6.r)
+    R32 = radial_dipole_length(s6.u, up32_on_rg, s6.r)
 
     # Fine-structure reduced matrix elements (alkali S1/2 -> PJ)
     d_np32 = np.sqrt(4.0 / 3.0) * R32  # in ea0
