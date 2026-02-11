@@ -117,8 +117,6 @@ RIN_W = np.array(RIN_W)
 
 ## Linear Response ####
 S_haar = isometry_haar_full()  # D=4
-o_f = build_Oseq(phases=phase, dt=dt, B=blockade_mrad, is_intensity=False)
-o_I = build_Oseq(phases=phase, dt=dt, B=blockade_mrad, is_intensity=True)
 TO_1 = []
 v_1photon = []
 RIN_1photon = []
@@ -158,12 +156,15 @@ for Omega_Rabi in Omega_Rabis:
     # print('phase parameter', phase_params1)
     H_gen1 = Hamiltonians(Omega_Rabi1=Omega_Rabi, blockade_inf=False, blockade=blockade_mrad, r_lifetime=1e10, Delta1=0,
                           Stark1=0, Stark2=0, resolution=resolution, r_lifetime2=1e10, pulse_time=pulse_time)
-    time, phase1, dt = phase_cosine_generate(*phase_params1, H_gen1.pulse_time, H_gen1.resolution)
-    fid1, global_phi = H_gen1.return_fidel(phases=phase1, dt=dt)
+    time, phase, dt = phase_cosine_generate(*phase_params1, H_gen1.pulse_time, H_gen1.resolution)
+    fid1, global_phi = H_gen1.return_fidel(phases=phase, dt=dt)
     infid_TO1 = 1 - fid1
     # print(infid_TO1)
     TO_1.append(infid_TO1)
 
+
+    o_f = build_Oseq(phases=phase, dt=dt, B=blockade_mrad, is_intensity=False) 
+    o_I = build_Oseq(phases=phase, dt=dt, B=blockade_mrad, is_intensity=True)
     vnoise1_contribution = []
     for i in range(len(vnoise_fs) - 1):
         deltaf = vnoise_fs[i + 1] - vnoise_fs[i]
@@ -187,7 +188,7 @@ for Omega_Rabi in Omega_Rabis:
         blockade1 = find_blockade_Mrad(atom_name, n, d)
         H_gen = Hamiltonians(Omega_Rabi1=Omega_Rabi, blockade_inf=False, blockade=blockade1, r_lifetime=1e10, Delta1=0,
                              Stark1=0, Stark2=0, resolution=resolution, r_lifetime2=1e10, pulse_time=pulse_time)
-        fid, global_phi = H_gen.asym_return_fidel(phases=phase1, dt=dt, omega1_scale=1, omega2_scale=1)
+        fid, global_phi = H_gen.asym_return_fidel(phases=phase, dt=dt, omega1_scale=1, omega2_scale=1)
         infids_s1.append(1 - fid)
 
     infids_s1 = np.asarray(infids_s1)
