@@ -59,7 +59,7 @@ edc_zero = 0 #V/m
 
 bdc_fluc = 10e-3 #G
 
-num_samples =1000
+num_samples =10000
 
 phase_noise_csv = "638_20MHz-2-2-2026.csv"
 RIN_csv_path = '319_Intensity_0.442VDC.csv'
@@ -194,7 +194,15 @@ for Omega_Rabi in Omega_Rabis:
     infids_s1 = np.asarray(infids_s1)
     infids_motion1.append(np.mean(infids_s1) - infid_TO1)
 
-    leakage1.append((Omega_Rabi) ** 2 / ((Omega_Rabi) ** 2 + HF_split ** 2))
+    H_gen1 = LeakageHamiltonians(Omega_Rabi1=Omega_Rabi, blockade_inf=False,
+    blockade=blockade_mrad, r_lifetime=10e9,
+                                 Delta1=0,
+                                 Stark1=0, Stark2=0, resolution=resolution, r_lifetime2=10e9,
+                                 pulse_time=pulse_time,
+                                 mj12_split=HF_split)
+    fid_with_leak, global_phi = H_gen1.return_fidel(phases=phase, dt=dt)
+    leakage_mj = (1 - fid_with_leak) - infid_TO1
+    leakage1.append(leakage_mj)
 
     scattering1.append(0)
 
@@ -205,7 +213,7 @@ decay_1photon = np.array(decay_1photon)
 leakage1 = np.array(leakage1)
 sum_1photon = v_1photon+ RIN_1photon+infids_motion1+decay_1photon+leakage1
 
-fig, ax = plt.subplots(figsize=(14,5), ncols=2)
+fig, ax = plt.subplots(figsize=(7,5))
 ax.plot(f_Rabis, v_1photon, c="#4e63ff", linewidth=2)
 ax.plot(f_Rabis, RIN_1photon, c="#ff4da6", linewidth=2)
 ax.plot(f_Rabis, infids_motion1, c="#2ecc71", linewidth=2)
@@ -294,7 +302,6 @@ raw_fig2 = dict(
 out = dict(
     meta=dict(
         script=os.path.basename(__file__) if '__file__' in globals() else 'budget_1photon_scan.py',
-        saved_at=datetime.datetime.now().isoformat(timespec="seconds"),
     ),
     config={k: _to_jsonable(v) for k, v in config.items()},
     raw_fig2=raw_fig2,
