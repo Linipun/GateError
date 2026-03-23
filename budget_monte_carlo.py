@@ -69,7 +69,8 @@ class Hamiltonians:
                  Stark1,
                  Stark2,
                  pulse_time,
-                 resolution
+                 resolution,
+                 mj12_split=None,
                  ):
         # raw parameters
         self.Omega_Rabi1 = Omega_Rabi1
@@ -88,7 +89,7 @@ class Hamiltonians:
         # fixed initial state
         self.initial_psi01 = np.array([1, 0], dtype=complex)
         self.init_parameters()
-
+        self.mj12_split = mj12_split
         self.phase = np.zeros(resolution)
 
     # Dynamic initial parameters
@@ -184,6 +185,75 @@ class Hamiltonians:
         psi01 /= gp
         psi11 /= gp ** 2
         return self.bell_state_fidelity(psi01, psi01, psi11), gp  # returns [fidelity, rotation_phase]
+
+class LeakageHamiltonians(Hamiltonians):
+    """
+    Provides Hamiltonian constructors given pulse parameters.
+    """
+
+    # Dynamic initial parameters
+    def init_parameters(self):
+        """Re-derive normalized / derived parameters"""
+        assert self.blockade_inf in (0, 1), "blockade_inf must be 0 (finite blockade) or 1 (infinite blockade)"
+        self.normalized_blockade = self.blockade / self.Omega_Rabi1
+        self.initial_psi01 = np.array([1, 0,0], dtype=complex)
+        if self.blockade_inf == 1:
+            self.initial_psi11 = np.array([1, 0,0,0], dtype=complex)
+        else:
+            self.initial_psi11 = np.array([1, 0, 0, 0, 0, 0, 0, 0, 0], dtype=complex)
+
+        self.decay_rate = (1 / self.r_lifetime) / self.Omega_Rabi1
+        self.decay_rate2 = (1 / self.r_lifetime2) / self.Omega_Rabi1
+
+    def H11(self, phase_i, omega1_scale: float = 1.0, omega2_scale: float = 1.0):
+        """Two-atom Hamiltonian at a given phase (Hermitian)."""
+        Omega1 = omega1_scale * np.exp(1j * phase_i) / 2
+        Omega2 = omega2_scale * np.exp(1j * phase_i) / 2
+        l_Omega1 = Omega1 / np.sqrt(3)
+        l_Omega2 = Omega1 / np.sqrt(3)
+        Delta1 = self.Delta1 / self.Omega_Rabi1
+        Stark1 = self.Stark1 / self.Omega_Rabi1
+        Stark2 = self.Stark2 / self.Omega_Rabi1
+        mf_split = self.mj12_split / self.Omega_Rabi1
+        if self.blockade_inf == 1:
+            H = np.array([
+                [0, Omega1 * np.sqrt(2)],
+                [np.conj(Omega1) * np.sqrt(2), Delta1],
+            ], complex)
+            decay_matrix = np.diag([0, -1j * self.decay_rate / 2])
+        else:
+            B = self.normalized_blockade
+            H = np.array([
+                [0, Omega1, Omega2, 0, 0, 0, l_Omega1, l_Omega2, 0],
+                [np.conj(Omega1), Delta1 + Stark1, 0, Omega2, 0 ,l_Omega2, 0, 0, 0],
+                [np.conj(Omega2), 0, Delta1 + Stark2, Omega1, l_Omega1, 0, 0, 0, 0],
+                [0, np.conj(Omega2), np.conj(Omega1), 2 * Delta1 + Stark1 + Stark2 + B, 0, 0, 0, 0, 0],
+                [0 ,0, np.conj(l_Omega1), 0 , 2*Delta1+Stark1+Stark2+mf_split, 0, np.conj(Omega2), 0, 0],
+                [0, np.conj(l_Omega2), 0, 0, 0, 2*Delta1+Stark1+Stark2+mf_split, 0, np.conj(Omega1), 0],
+                [np.conj(l_Omega1), 0, 0, 0, Omega2, 0, Delta1+Stark1+mf_split, 0, np.conj(l_Omega2)],
+                [np.conj(l_Omega2), 0, 0, 0, 0, Omega1, 0, Delta1+Stark2+mf_split, np.conj(l_Omega1)],
+                [0, 0, 0, 0, 0, 0, np.conj(l_Omega2), np.conj(l_Omega1), B+Stark1+Stark2+2*Delta1+2*mf_split]
+            ], complex)
+            decay_matrix = np.diag([0, self.decay_rate, self.decay_rate2, self.decay_rate + self.decay_rate2,
+                                    self.decay_rate + self.decay_rate2, self.decay_rate + self.decay_rate2, self.decay_rate,
+                                    self.decay_rate2, self.decay_rate + self.decay_rate2])
+            H += (-1j * decay_matrix / 2)
+        return H
+
+    def H01(self, phase_i, omega_scale: float = 1.0):
+        """Single-atom Hamiltonian at a given phase (Hermitian)."""
+        Omega1 = omega_scale * np.exp(1j * phase_i) / 2
+        Delta1 = self.Delta1 / self.Omega_Rabi1
+        Omega2 = omega_scale/ np.sqrt(3) * np.exp(1j * phase_i) / 2
+        Delta2 = self.mj12_split / self.Omega_Rabi1
+        H = np.array([
+            [0, Omega1, Omega2],
+            [np.conj(Omega1), Delta1, 0,],
+            [np.conj(Omega2), 0 , Delta2]
+        ], complex)
+        decay_matrix = np.diag([0, -1j * self.decay_rate / 2, -1j * self.decay_rate/2])
+        H += decay_matrix
+        return H
 
 
 def fid_optimize(param, fid_gen):
