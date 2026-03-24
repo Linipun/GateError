@@ -31,7 +31,8 @@ os.makedirs(result,exist_ok=True)
 
 #### config #######
 atom_name = 'Cs'
-n=63
+arg = eval('['+sys.argv[1]+']')
+n =  int(arg[0])
 
 Omega_Rabi = 8*2*np.pi
 
