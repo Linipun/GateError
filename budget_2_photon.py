@@ -76,28 +76,31 @@ RIN_csv_path = '319_Intensity_0.442VDC.csv'
 RIN_background_csv_path = 'UV_intensity_background.csv'
 intensity_DC_V = 0.442
 
-# Blockade
-with open('6363_blockade.pkl', 'rb') as file:
-    # Load the object from the file
-    blockade2_dict = pickle.load(file)
-def find_blockade_Mrad_2photon(atom_name, n, d):
-    # blockades = blockade2_dict[atom_name][str(n)]
-    b_r = blockade2_dict['r']
-    b_values = blockade2_dict['blockade_MHz']
-    b = np.interp(d, b_r, b_values)
-    return b * 2 * np.pi
+
 
 
 if atom_name == "Rb":
     atom = Rubidium()
     n_g = 5
-    w_qubit = 9192631770 * 2 * np.pi
+    w_qubit = 6834682610 * 2 * np.pi
+    # Blockade
+    with open('Rb-Rb-s-states-90-deg.pkl', 'rb') as file:
+        # Load the object from the file
+        blockade2_dict = pickle.load(file)
 elif atom_name == "Cs":
     atom = Caesium()
     n_g = 6
-    w_qubit = 6.8e9 * 2 * np.pi
+    w_qubit = 9192631770 * 2 * np.pi
+    with open('Cs-Cs-s-states-90-deg.pkl', 'rb') as file:
+        # Load the object from the file
+        blockade2_dict = pickle.load(file)
 
-
+def find_blockade_Mrad_2photon(atom_name, n, d):
+    # blockades = blockade2_dict[atom_name][str(n)]
+    b_r = blockade2_dict[(atom_name,atom_name,n,n)]['r']
+    b_values = blockade2_dict[(atom_name,atom_name,n,n)]['B']
+    b = np.interp(d, b_r, b_values)
+    return b * 1e3 * 2 * np.pi
 blockade_mrad = find_blockade_Mrad_2photon(atom_name, n, atom_d)
 print('Blockade:', blockade_mrad/2/np.pi , 'MHz')
 R_lifetime = atom.getStateLifetime(n=n,l=0,j=1/2,temperature=300, includeLevelsUpTo=n+20,s=0.5)*1e6
