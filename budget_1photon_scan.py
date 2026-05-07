@@ -34,30 +34,30 @@ l = 1
 j = 3/2
 mj = 3/2
 
-atom_d = 2.5 #um
-Omega_Rabi= 1*2*np.pi  #MHz
+atom_d = arg[1] #um
+Omega_Rabi= 10*2*np.pi  #MHz
 Bz = 10 #G
 pulse_time= 7.65 #Omega_Rabi
 resolution = 200 # number of phase steps in the pulse
 
-w0_rydberg = 10 #um
+w0_rydberg = 20 #um
 lambda_rydberg = 0.319 #um
 
-HF_split = 500*np.pi*2 # MHz
-HF_split = None #if mj=1/2 split is from B-field
+HF_split = 700*np.pi*2 # MHz
+# HF_split = None #if mj=1/2 split is from B-field
 
 alpha_dc = 700 #MHz (V/cm)^-2
 alpha_dc = None
 
-T_atom = 15 #uK
-trap_depth = arg[1] #uK
+T_atom = 5 #uK
+trap_depth = 1000 #uK
 lambda_trap = 1.064 #um
 w0_trap = 1.2 #um
 
-edc_fluc = 10e-3 #V/cm
+edc_fluc = 5e-3 #V/cm
 edc_zero = 0 #V/m
 
-bdc_fluc = 10e-3 #G
+bdc_fluc = 5e-3 #G
 
 num_samples =10000
 
@@ -66,7 +66,7 @@ RIN_csv_path = '319_Intensity_0.442VDC.csv'
 RIN_background_csv_path = 'UV_intensity_background.csv'
 intensity_DC_V = 0.442
 
-f_Rabis = np.linspace(0.1, 2, 50)
+f_Rabis = np.linspace(2, 20, 20)
 #### config #######
 
 
@@ -81,6 +81,11 @@ m_atom = atom.mass
 if HF_split is None:
     HF_split = (atom.getZeemanEnergyShift(l=1, j=3/2, mj=3/2, magneticFieldBz=Bz/10000)-
                 atom.getZeemanEnergyShift(l=1, j=3/2, mj=1/2, magneticFieldBz=Bz/10000))/hbar/1e6
+if alpha_dc is None:
+    calc = StarkMap(atom)
+    calc.defineBasis(n=n, l=1, j=1.5, mj=1.5, nMin=n - 20, nMax=n + 30, maxL=5, Bz=Bz / 10000)
+    calc.diagonalise(np.linspace(0, 60, 600))
+    alpha_dc = calc.getPolarizability(debugOutput=True)
 
 phase_noise_data = phase_noise.procData(phase_noise_csv, True, "638nm", range=20e6, p0=phase_noise.p0dict_638)
 label = phase_noise_data[1][1]
@@ -115,13 +120,18 @@ RIN_W = db_to_w(RIN_dbc)
 fs_intensity = np.array(fs_intensity)
 RIN_W = np.array(RIN_W)
 
+
 ## Linear Response ####
 S_haar = isometry_haar_full()  # D=4
+
 TO_1 = []
 v_1photon = []
 RIN_1photon = []
+E_1photon = []
+B_1photon = []
+doppler_1photon = []
 decay_1photon = []
-infids_motion1 = []
+infids_motion_blockade = []
 leakage1 = []
 scattering1 = []
 
@@ -162,7 +172,6 @@ for Omega_Rabi in Omega_Rabis:
     # print(infid_TO1)
     TO_1.append(infid_TO1)
 
-
     o_f = build_Oseq(phases=phase, dt=dt, B=blockade_mrad, is_intensity=False) 
     o_I = build_Oseq(phases=phase, dt=dt, B=blockade_mrad, is_intensity=True)
     vnoise1_contribution = []
@@ -171,17 +180,59 @@ for Omega_Rabi in Omega_Rabis:
         #
         If_1 = response_G13(o_f, S_haar, vnoise_fs[i] * 2 * np.pi / Omega_Rabi, dt=dt) / Omega_Rabi ** 2
         vnoise1_contribution.append(If_1 * vnoise_W[i] * deltaf / 1e6)
-
-    v_1photon.append(np.sum(vnoise1_contribution))
+    v_contribution = np.sum(vnoise1_contribution)
+    v_1photon.append(v_contribution)
 
     Inoise1_contribution = []
     for i in range(len(fs_intensity) - 2):
         deltaf = fs_intensity[i + 2] - fs_intensity[i + 1]
         Ii = response_G13(o_I, S_haar, fs_intensity[i + 2] * 2 * np.pi / 1e6 / Omega_Rabi, dt=dt)
         Inoise1_contribution.append(Ii * RIN_W[i + 2] * deltaf)
-    RIN_1photon.append(np.sum(Inoise1_contribution))
+    RIN_contribution = np.sum(Inoise1_contribution)
+    RIN_1photon.append(RIN_contribution)
 
-    decay_1photon.append((2.95 / (Omega_Rabi)) / R_lifetime)
+
+    infids_decay = (2.95 / (Omega_Rabi)) / R_lifetime
+    decay_1photon.append(infids_decay)
+
+
+    doppler_shift = 1 / lambda_trap / 1e-6 * np.sqrt(kb * (T_atom * 1e-6) / m_atom)
+    # print('doppler shift:', doppler_shift / 2 / np.pi, 'Hz')
+
+    delta_edc = abs(-1 / 2 * alpha_dc * 1e6 * ((edc_zero + edc_fluc) ** 2 - edc_zero ** 2)) * 2 * np.pi
+    # print('Electric DC fluctuation:', delta_edc / 2 / np.pi, 'Hz')
+
+    delta_bdc = atom.getZeemanEnergyShift(l=1, j=3 / 2, mj=3 / 2, magneticFieldBz=bdc_fluc / 10000) / hbar
+    # print('Magnetic DC fluctuation:', delta_bdc / 2 / np.pi, 'Hz')
+
+    total_shift = np.sqrt(delta_bdc ** 2 + delta_edc ** 2 + doppler_shift ** 2)
+    # print('Total DC detuning fluctuation:', total_shift / 2 / np.pi, 'Hz')
+    detunings = total_shift / 1e6 / Omega_Rabi
+    # print('delta/Ω:', detunings)
+    # print('==============')
+    infids_s = []
+    for i in range(num_samples):
+        d = sample_gaussian(detunings)
+        H_gen = Hamiltonians(Omega_Rabi1=Omega_Rabi, blockade_inf=False, blockade=blockade_mrad, r_lifetime=10e9,
+                             Delta1=d,
+                             Stark1=0, Stark2=0, resolution=resolution, r_lifetime2=10e9, pulse_time=pulse_time)
+        fid, global_phi = H_gen.return_fidel(phases=phase, dt=dt)
+        infids_s.append(1 - fid)
+    infids_s = np.asarray(infids_s)
+    infids_detuning = np.mean(infids_s) - infid_TO1
+    infids_detiuning_std = infids_s.std(ddof=1)
+
+    infids_bdc = delta_bdc ** 2 / total_shift ** 2 * infids_detuning
+    infids_edc = delta_edc ** 2 / total_shift ** 2 * infids_detuning
+    infids_doppler = doppler_shift ** 2 / total_shift ** 2 * infids_detuning
+
+    # print(f'total error due to detuning: {infids_detuning} +/- {infids_detiuning_std}')
+    # print('error due to E field: {}'.format(infids_edc))
+    # print('error due to B field: {}'.format(infids_bdc))
+    # print('error due to doppler: {}'.format(infids_doppler))
+    E_1photon.append(infids_edc)
+    B_1photon.append(infids_bdc)
+    doppler_1photon.append(infids_doppler)
 
     infids_s1 = []
     for d in ds:
@@ -192,7 +243,8 @@ for Omega_Rabi in Omega_Rabis:
         infids_s1.append(1 - fid)
 
     infids_s1 = np.asarray(infids_s1)
-    infids_motion1.append(np.mean(infids_s1) - infid_TO1)
+    infid_blockade =np.mean(infids_s1) - infid_TO1
+    infids_motion_blockade.append(infid_blockade)
 
     H_gen1 = LeakageHamiltonians(Omega_Rabi1=Omega_Rabi, blockade_inf=False,
     blockade=blockade_mrad, r_lifetime=10e9,
@@ -205,29 +257,40 @@ for Omega_Rabi in Omega_Rabis:
     leakage1.append(leakage_mj)
 
     scattering1.append(0)
+    total = infid_TO1+infid_blockade+leakage_mj+infids_detuning+v_contribution+RIN_contribution+infids_decay
+    print('total error:', total)
 
 v_1photon = np.array(v_1photon)
 RIN_1photon = np.array(RIN_1photon)
-infids_motion1 = np.array(infids_motion1)
+infids_motion_blockade = np.array(infids_motion_blockade)
+E_1photon = np.array(E_1photon)
+B_1photon = np.array(B_1photon)
+doppler_1photon = np.array(doppler_1photon)
 decay_1photon = np.array(decay_1photon)
 leakage1 = np.array(leakage1)
-sum_1photon = v_1photon+ RIN_1photon+infids_motion1+decay_1photon+leakage1
+sum_1photon = v_1photon+ RIN_1photon+infids_motion_blockade+decay_1photon+leakage1+E_1photon+B_1photon+doppler_1photon
+print('min infid:', min(sum_1photon))
 
 fig, ax = plt.subplots(figsize=(7,5))
-ax.plot(f_Rabis, v_1photon, c="#4e63ff", linewidth=2)
-ax.plot(f_Rabis, RIN_1photon, c="#ff4da6", linewidth=2)
-ax.plot(f_Rabis, infids_motion1, c="#2ecc71", linewidth=2)
-ax.plot(f_Rabis, decay_1photon, c="#7f8c8d", linewidth=2)
-ax.plot(f_Rabis, sum_1photon, c="k", linewidth=4)
+ax.plot(f_Rabis, v_1photon, c="#4e63ff", linewidth=2, label="$v$")
+ax.plot(f_Rabis, RIN_1photon, c="#ff4da6", linewidth=2, label="RIN")
+# ax.plot(f_Rabis,E_1photon, c="#ff4da6", linewidth=2)
+ax.plot(f_Rabis, infids_motion_blockade, c="#2ecc71", linewidth=2, label="$\delta V$")
+ax.plot(f_Rabis, decay_1photon, c="#7f8c8d", linewidth=2, label='$\gamma$')
+ax.plot(f_Rabis, sum_1photon, c="k", linewidth=4, label='$\Sigma$')
 # ax.plot(f_Rabis, scattering1, c='blue', linewidth=2)
-ax.plot(f_Rabis, leakage1, c='blue', linewidth=2)
+ax.plot(f_Rabis, leakage1, linewidth=2, label='leakage')
+ax.plot(f_Rabis, E_1photon, linewidth=2, label='E')
+ax.plot(f_Rabis, B_1photon, linewidth=2, label='B')
+ax.plot(f_Rabis, doppler_1photon, linewidth=2, label='doppler')
 ax.axhline(1e-3, c='k', linestyle=":")
 ax.set_ylabel("Infidelity", fontsize=14)
 ax.set_xlabel("$\Omega/ 2\pi$ [MHz] ", fontsize=14)
 ax.tick_params(labelsize=12)
 ax.set_yscale('log')
 ax.set_title('$1 \gamma$ gate', fontsize=16)
-ax.set_ylim([1e-6, 1e-1])
+ax.set_ylim([1e-9, 1e-3])
+ax.legend(fontsize=14)
 fig.savefig(os.path.join(result, 'Error_vs_rabi.pdf'), bbox_inches='tight')
 
 
@@ -291,7 +354,10 @@ raw_fig2 = dict(
     y=dict(
         vnoise=_to_jsonable(v_1photon),
         RIN=_to_jsonable(RIN_1photon),
-        motional=_to_jsonable(infids_motion1),
+        motional=_to_jsonable(infids_motion_blockade),
+        efield=_to_jsonable(E_1photon),
+        bfield=_to_jsonable(B_1photon),
+        doppler=_to_jsonable(doppler_1photon),
         decay=_to_jsonable(decay_1photon),
         leakage=_to_jsonable(np.array(leakage1)),
         scattering=_to_jsonable(np.array(scattering1)),
