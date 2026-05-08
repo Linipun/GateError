@@ -37,10 +37,10 @@ n =  int(arg[0])
 Omega_Rabi = 8*2*np.pi
 
 
-atom_d = 2.8 #um
+atom_d = float(arg[1]) #um
 # Omega_Rabi = 5*2*np.pi #MHz*2pi
 
-inter_detuning = 5000*2*np.pi #MHz*2pi
+inter_detuning = 10000*2*np.pi #MHz*2pi
 intermediate_n = 7
 intermediate_l = 1
 intermediate_j = 1/2
@@ -66,7 +66,7 @@ edc_fluc = 1e-3 #V/cm
 edc_zero = 0 #V/m
 bdc_fluc = 1e-3 #G
 
-num_samples =100
+num_samples =10000
 
 pol_dc = 282
 
@@ -109,28 +109,21 @@ tau_7p = atom.getStateLifetime(n=intermediate_n, l=intermediate_l, j=intermediat
 m_atom = atom.mass
 
 
-f_Rabis = np.linspace(0.1, 2, 50)
+f_Rabis = np.linspace(1, 25, 25)
 Omega_Rabis = 2 * np.pi * f_Rabis
 
 # --- Collect scan results for saving ---
-scan_results = {
-    'Omega_Rabi_MHz': [],
-    'total_error': [],
-    'breakdown': {
-        'theoretical_limit': [],
-        'detuning_total': [],
-        'detuning_E_field': [],
-        'detuning_B_field': [],
-        'detuning_doppler': [],
-        'motion_total': [],
-        'motion_blockade_only': [],
-        'motion_rabi_only': [],
-        'intermediate_scattering': [],
-        'rydberg_decay': [],
-        'laser_phase_noise': [],
-        'laser_intensity_RIN': [],
-    },
-}
+TO_2 = []
+v_2photon = []
+RIN_2photon = []
+E_2photon = []
+B_2photon = []
+doppler_2photon = []
+decay_2photon = []
+infids_motion_blockade2 = []
+leakage2 = []
+scattering2 = []
+infids_motion_rabi2 = []
 
 for Omega_Rabi in Omega_Rabis:
     #### 2 photons gate ###
@@ -175,24 +168,25 @@ for Omega_Rabi in Omega_Rabis:
     # fid_optimize(PhaseGuess, H_gen)
     # H_gen.return_fidel
     fid, global_phi = H_gen.return_fidel(phases=phase_guess, dt=dt)
-    print('Infidelity before optimizer:', 1 - fid)
+    # print('Infidelity before optimizer:', 1 - fid)
     opt_out = opt.minimize(fun=fid_optimize, x0=PhaseGuess, args=(H_gen))
     phase_params = opt_out.x
     # print(phase_params)
     infid_TO_theory = opt_out.fun
-    print('Infidelity after optimizer:', infid_TO_theory)
-    print('phase parameter', phase_params)
+    # print('Infidelity after optimizer:', infid_TO_theory)
+    # print('phase parameter', phase_params)
     H_gen = Hamiltonians(Omega_Rabi1=Omega_Rabi, blockade_inf=False, blockade=blockade_mrad, r_lifetime=1e10, Delta1=0,
                          Stark1=0, Stark2=0, resolution=resolution, r_lifetime2=1e10, pulse_time=pulse_time)
     time, phase, dt = phase_cosine_generate(*phase_params, H_gen.pulse_time, H_gen.resolution)
     fid, global_phi = H_gen.return_fidel(phases=phase, dt=dt)
     infid_TO = 1 - fid
-    print(infid_TO)
-    plt.plot(time, phase)
+    TO_2.append(infid_TO)
+    # print(infid_TO)
+    # plt.plot(time, phase)
 
 
     doppler_shift = (1/lambda_rydberg-1/lambda_rydberg1)/1e-6*np.sqrt(kb*(T_atom*1e-6)/m_atom)
-    print('doppler shift:', doppler_shift/2/np.pi, 'Hz')
+    # print('doppler shift:', doppler_shift/2/np.pi, 'Hz')
 
     calc = StarkMap(atom)
     if pol_dc is None:
@@ -200,16 +194,16 @@ for Omega_Rabi in Omega_Rabis:
         calc.diagonalise(np.linspace(0,1,100))
         pol_dc = calc.getPolarizability(debugOutput=True)
     delta_edc = abs(-1/2*pol_dc*1e6*((edc_zero+edc_fluc)**2-edc_zero**2))*2*np.pi
-    print('Electric DC fluctuation:', delta_edc/2/np.pi, 'Hz')
+    # print('Electric DC fluctuation:', delta_edc/2/np.pi, 'Hz')
 
     delta_bdc = atom.getZeemanEnergyShift(l=0, j=1/2, mj=-1/2, magneticFieldBz=bdc_fluc/10000)/hbar
-    print('Magnetic DC fluctuation:', delta_bdc/2/np.pi, 'Hz')
+    # print('Magnetic DC fluctuation:', delta_bdc/2/np.pi, 'Hz')
 
     total_shift = np.sqrt(delta_bdc**2+ delta_edc**2 + doppler_shift**2)
-    print('Total DC detuning fluctuation:', total_shift/2/np.pi, 'Hz')
+    # print('Total DC detuning fluctuation:', total_shift/2/np.pi, 'Hz')
     detunings = total_shift/1e6/Omega_Rabi
-    print('delta/Ω:', detunings)
-    print('==============')
+    # print('delta/Ω:', detunings)
+    # print('==============')
     infids_s = []
     for i in range(num_samples):
         d = sample_gaussian(detunings)
@@ -223,11 +217,14 @@ for Omega_Rabi in Omega_Rabis:
     infids_bdc = delta_bdc**2/total_shift**2*infids_detuning
     infids_edc = delta_edc**2/total_shift**2*infids_detuning
     infids_doppler = doppler_shift**2/total_shift**2*infids_detuning
-
-    print(f'total error due to detuning: {infids_detuning} +/- {infids_detiuning_std}')
-    print('error due to E field: {}'.format(infids_edc))
-    print('error due to B field: {}'.format(infids_bdc))
-    print('error due to doppler: {}'.format(infids_doppler))
+    #
+    # print(f'total error due to detuning: {infids_detuning} +/- {infids_detiuning_std}')
+    # print('error due to E field: {}'.format(infids_edc))
+    # print('error due to B field: {}'.format(infids_bdc))
+    # print('error due to doppler: {}'.format(infids_doppler))
+    E_2photon.append(infids_edc)
+    B_2photon.append(infids_bdc)
+    doppler_2photon.append(infids_doppler)
 
     infids_s = []
     infids_blockade = []
@@ -282,9 +279,12 @@ for Omega_Rabi in Omega_Rabis:
     infids_motion_rabi = np.mean(infids_rabi) - infid_TO
     infids_motion_rabi_std = infids_rabi.std(ddof=1)
 
-    print(f'total error due to atom motion: {infids_motion} +/- {infids_motion_std}')
-    print(f'total error due to atom motion(blockade): {infids_motion_blockade} +/- {infids_motion_blockade_std}')
-    print(f'total error due to atom motion(rabi): {infids_motion_rabi} +/- {infids_motion_rabi_std}')
+    # print(f'total error due to atom motion: {infids_motion} +/- {infids_motion_std}')
+    # print(f'total error due to atom motion(blockade): {infids_motion_blockade} +/- {infids_motion_blockade_std}')
+    # print(f'total error due to atom motion(rabi): {infids_motion_rabi} +/- {infids_motion_rabi_std}')
+    infids_motion_blockade2.append(infids_motion_blockade)
+    infids_motion_rabi2.append(infids_motion_blockade)
+    # infids_motion_blockade2.append(infids_motion_blockade)
 
     # delta_mj = atom.getZeemanEnergyShift(l=1, j=3/2, mj=3/2, magneticFieldBz=Bz/10000)/hbar/1e6 - \
     # atom.getZeemanEnergyShift(l=1, j=3/2, mj=1/2, magneticFieldBz=Bz/10000)/hbar/1e6
@@ -318,11 +318,12 @@ for Omega_Rabi in Omega_Rabis:
         psi_no = scipy.linalg.expm(-1j * H0_no * scatter_dt) @ psi_no
     # scattering_e = 0.95/Omega_Rabi/tau_7p*Omega1_0**2/(inter_detuning+w_qubit)**2 + 0.95/Omega_Rabi/tau_7p*(Omega1_0**2+Omega2_0**2)/(inter_detuning)**2+0.12/Omega_Rabi/tau_7p*(Omega1_0**2-Omega2_0**2)/(inter_detuning)**2
     scattering_e =  abs(psi_no[0] ** 2) - abs(psi[0] ** 2)
-    print('error due to scattering:', scattering_e)
-
+    # print('error due to scattering:', scattering_e)
+    scattering2.append(scattering_e)
 
     loss_decay = (2.95/(Omega_Rabi))/R_lifetime
-    print('error due to Rydberg decay:', loss_decay)
+    # print('error due to Rydberg decay:', loss_decay)
+    decay_2photon.append(loss_decay)
 
     phase_noise_data = phase_noise.procData(phase_noise_csv, True, "638nm", range=20e6, p0=phase_noise.p0dict_638)
     label = phase_noise_data[1][1]
@@ -348,7 +349,8 @@ for Omega_Rabi in Omega_Rabis:
         If_2p_1 = response_2photon(oOseq_nu1, S_haar, vnoise_fs[i]*2*np.pi, dt_real)
         vnoise_contribution.append((If_2p_1*2)*vnoise_W[i]*deltaf/1e6)
     vnoise_error= np.sum(vnoise_contribution)
-    print('error due to laser phase noise:', vnoise_error)
+    # print('error due to laser phase noise:', vnoise_error)
+    v_2photon.append(vnoise_error)
 
     intensity_noise_csv = pd.read_csv(RIN_csv_path, header=None)
     background_noise_csv = pd.read_csv(RIN_background_csv_path, header=None)
@@ -386,82 +388,131 @@ for Omega_Rabi in Omega_Rabis:
         RIN_contribution.append((Ii_2p_1+Ii_2p_2)*RIN_W[i+2]*deltaf)
 
     RIN_error = np.sum(RIN_contribution)
-    print('error due to RIN:', RIN_error)
+    # print('error due to RIN:', RIN_error)
+    RIN_2photon.append(RIN_error)
+
+    total_error = vnoise_error + RIN_error + infids_motion + loss_decay  +  infids_edc + infids_bdc+ infids_doppler + scattering_e
+    print(Omega_Rabi, total_error)
+
+v_2photon = np.array(v_2photon)
+RIN_2photon = np.array(RIN_2photon)
+infids_motion_blockade2 = np.array(infids_motion_blockade2)
+infids_motion_rabi2 = np.array(infids_motion_rabi2)
+E_2photon = np.array(E_2photon)
+B_2photon = np.array(B_2photon)
+doppler_2photon = np.array(doppler_2photon)
+decay_2photon = np.array(decay_2photon)
+leakage2 = np.array(leakage2)
+
+sum_2photon = (v_2photon+ RIN_2photon+infids_motion_blockade2+infids_motion_rabi2+decay_2photon+leakage2+
+               E_2photon+B_2photon+doppler_2photon)
+print('min infid:', min(sum_2photon))
 
 
-    total_error = loss_decay  + infids_motion + infids_detuning+scattering_e+RIN_error+vnoise_error
-    # Store per-point results
-    scan_results['Omega_Rabi_MHz'].append(float(Omega_Rabi/(2*np.pi)))
-    scan_results['total_error'].append(float(total_error))
-    scan_results['breakdown']['theoretical_limit'].append(float(infid_TO))
-    scan_results['breakdown']['detuning_total'].append(float(infids_detuning))
-    scan_results['breakdown']['detuning_E_field'].append(float(infids_edc))
-    scan_results['breakdown']['detuning_B_field'].append(float(infids_bdc))
-    scan_results['breakdown']['detuning_doppler'].append(float(infids_doppler))
-    scan_results['breakdown']['motion_total'].append(float(infids_motion))
-    scan_results['breakdown']['motion_blockade_only'].append(float(infids_motion_blockade))
-    scan_results['breakdown']['motion_rabi_only'].append(float(infids_motion_rabi))
-    scan_results['breakdown']['intermediate_scattering'].append(float(scattering_e))
-    scan_results['breakdown']['rydberg_decay'].append(float(loss_decay))
-    scan_results['breakdown']['laser_phase_noise'].append(float(vnoise_error))
-    scan_results['breakdown']['laser_intensity_RIN'].append(float(RIN_error))
-    print('total error:', total_error)
+fig, ax = plt.subplots(figsize=(7,5))
+ax.plot(f_Rabis, v_2photon, c="#4e63ff", linewidth=2, label="$v$")
+ax.plot(f_Rabis, RIN_2photon, c="#ff4da6", linewidth=2, label="RIN")
+# ax.plot(f_Rabis,E_2photon, c="#ff4da6", linewidth=2)
+ax.plot(f_Rabis, infids_motion_blockade2, c="#2ecc71", linewidth=2, label="$\delta V$")
+ax.plot(f_Rabis, infids_motion_rabi2, linewidth=2, label='$\delta \Omega$')
+ax.plot(f_Rabis, decay_2photon, c="#7f8c8d", linewidth=2, label='$\gamma$')
+ax.plot(f_Rabis, sum_2photon, c="k", linewidth=4, label='$\Sigma$')
+# ax.plot(f_Rabis, scattering1, c='blue', linewidth=2)
+ax.plot(f_Rabis, leakage2, linewidth=2, label='leakage')
+ax.plot(f_Rabis, E_2photon, linewidth=2, label='E')
+ax.plot(f_Rabis, B_2photon, linewidth=2, label='B')
+ax.plot(f_Rabis, doppler_2photon, linewidth=2, label='doppler')
+ax.axhline(1e-3, c='k', linestyle=":")
+ax.set_ylabel("Infidelity", fontsize=14)
+ax.set_xlabel("$\Omega/ 2\pi$ [MHz] ", fontsize=14)
+ax.tick_params(labelsize=12)
+ax.set_yscale('log')
+ax.set_title('$1 \gamma$ gate', fontsize=16)
+ax.set_ylim([1e-9, 1e-3])
+ax.legend(fontsize=14)
+fig.savefig(os.path.join(result, 'Error_vs_rabi.pdf'), bbox_inches='tight')
 
-# --- Save config + raw scan data to JSON ---
-config = {
-    'atom_name': atom_name,
-    'n': int(n),
-    'atom_d_um': float(atom_d),
-    'Bz_G': float(Bz),
-    'pulse_time': float(pulse_time),
-    'resolution': int(resolution),
-    'num_samples': int(num_samples),
-    'intermediate': {
-        'inter_detuning_MHz_2pi': float(inter_detuning/(2*np.pi)),
-        'intermediate_n': int(intermediate_n),
-        'intermediate_l': int(intermediate_l),
-        'intermediate_j': float(intermediate_j),
-    },
-    'rydberg_beams': {
-        'w0_rydberg_um': float(w0_rydberg),
-        'lambda_rydberg_um': float(lambda_rydberg),
-        'w0_rydberg1_um': float(w0_rydberg1),
-        'lambda_rydberg1_um': float(lambda_rydberg1),
-    },
-    'trap': {
-        'T_atom_uK': float(T_atom),
-        'trap_depth_uK': float(trap_depth),
-        'lambda_trap_um': float(lambda_trap),
-        'w0_trap_um': float(w0_trap),
-    },
-    'dc_fluctuations': {
-        'edc_fluc_V_per_cm': float(edc_fluc),
-        'edc_zero_V_per_m': float(edc_zero),
-        'bdc_fluc_G': float(bdc_fluc),
-        'pol_dc': None if pol_dc is None else float(pol_dc),
-    },
-    'noise_files': {
-        'phase_noise_csv': str(phase_noise_csv),
-        'RIN_csv_path': str(RIN_csv_path),
-        'RIN_background_csv_path': str(RIN_background_csv_path),
-        'intensity_DC_V': float(intensity_DC_V),
-    },
-    'derived': {
-        'blockade_MHz_2pi': float(blockade_mrad/(2*np.pi)),
-        'rydberg_lifetime_us': float(R_lifetime),
-    },
-    'saved_at': datetime.now().isoformat(),
-}
+# -----------------------------
+# Save config + raw scan data
+# -----------------------------
+def _to_jsonable(x):
+    """Convert numpy/pandas types to JSON-serializable python types."""
+    try:
+        import numpy as _np
+        if isinstance(x, (_np.integer,)):
+            return int(x)
+        if isinstance(x, (_np.floating,)):
+            return float(x)
+        if isinstance(x, (_np.ndarray,)):
+            return x.tolist()
+    except Exception:
+        pass
+    # pandas scalars
+    try:
+        import pandas as _pd
+        if isinstance(x, (_pd.Timestamp,)):
+            return x.isoformat()
+    except Exception:
+        pass
+    return x
 
-raw = {
-    'f_Rabi_MHz': [float(x) for x in f_Rabis],
-    'Omega_Rabi_MHz_2pi': scan_results['Omega_Rabi_MHz'],
-    'total_error': scan_results['total_error'],
-    'breakdown': scan_results['breakdown'],
-}
+config = dict(
+    atom_name=atom_name,
+    n=int(n), l=l, j=float(j), mj=float(mj),
+    atom_d_um=float(atom_d),
+    Bz_G=float(Bz),
+    pulse_time=float(pulse_time),
+    resolution=int(resolution),
+    w0_rydberg_um=float(w0_rydberg),
+    lambda_rydberg_um=float(lambda_rydberg),
+    alpha_dc_MHz_per_Vcm2=float(pol_dc) if pol_dc is not None else None,
+    interme_detuning=inter_detuning,
+    T_atom_uK=float(T_atom),
+    trap_depth_uK=float(trap_depth),
+    lambda_trap_um=float(lambda_trap),
+    w0_trap_um=float(w0_trap),
+    edc_fluc_V_per_cm=float(edc_fluc),
+    edc_zero_V_per_m=float(edc_zero),
+    bdc_fluc_G=float(bdc_fluc),
+    num_samples=int(num_samples),
+    phase_noise_csv=str(phase_noise_csv),
+    RIN_csv_path=str(RIN_csv_path),
+    RIN_background_csv_path=str(RIN_background_csv_path),
+    intensity_DC_V=float(intensity_DC_V),
+    f_Rabi_scan_MHz=dict(start=float(f_Rabis[0]), stop=float(f_Rabis[-1]), num=int(len(f_Rabis))),
+    derived=dict(
+        blockade_mrad=float(blockade_mrad),
+        blockade_MHz=float(blockade_mrad/2/np.pi),
+        R_lifetime_us=float(R_lifetime),
+    ),
+)
 
-out = {'config': config, 'raw': raw}
-out_name = f"scan_2photon_n{n}_config_and_raw.json"
-with open(out_name, 'w') as f:
+raw_fig2 = dict(
+    x=dict(name="Omega_over_2pi_MHz", values=_to_jsonable(f_Rabis)),
+    y=dict(
+        vnoise=_to_jsonable(v_2photon),
+        RIN=_to_jsonable(RIN_2photon),
+        motional=_to_jsonable(infids_motion_blockade2),
+        efield=_to_jsonable(E_2photon),
+        bfield=_to_jsonable(B_2photon),
+        doppler=_to_jsonable(doppler_2photon),
+        decay=_to_jsonable(decay_2photon),
+        leakage=_to_jsonable(np.array(leakage2)),
+        scattering=_to_jsonable(np.array(scattering2)),
+        total=_to_jsonable(sum_2photon),
+    ),
+)
+
+out = dict(
+    meta=dict(
+        script=os.path.basename(__file__) if '__file__' in globals() else 'budget_2photon_scan.py',
+    ),
+    config={k: _to_jsonable(v) for k, v in config.items()},
+    raw_fig2=raw_fig2,
+)
+
+out_json = os.path.join(result,f"scan_2photon_n{int(n)}_config_and_raw.json")
+with open(out_json, "w") as f:
     json.dump(out, f, indent=2)
-print(f"Saved config + raw scan data to: {out_name}")
+
+print(f"Saved config + raw scan data to: {out_json}")

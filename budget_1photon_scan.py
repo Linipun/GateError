@@ -131,10 +131,11 @@ E_1photon = []
 B_1photon = []
 doppler_1photon = []
 decay_1photon = []
-infids_motion_blockade = []
+infids_motion_blockade1 = []
+infids_motion_rabi1 = []
 leakage1 = []
 scattering1 = []
-
+rabi_1photon = []
 
 Omega_Rabis = 2 * np.pi * f_Rabis
 sigma_r = sigma_r_um(T_atom, trap_depth, w0_trap)
@@ -146,7 +147,15 @@ ds, c1, c2, = sample_pair_distances(
     x_offset=atom_d,
     rng=None
 )
-
+x1 = c1['x']
+y1 = c1['y']
+z1 = c1['z']
+x2 = c2['x']
+y2 = c2['y']
+z2 = c2['z']
+rabi = np.sqrt(relative_gaussian_beam_intensity(0, 0, 0-atom_d/2, w0_rydberg, lambda_rydberg))
+rabis1 = np.sqrt(relative_gaussian_beam_intensity(x1, z1, y1-atom_d/2, w0_rydberg, lambda_rydberg))/rabi
+rabis2 = np.sqrt(relative_gaussian_beam_intensity(x2-atom_d, z2, y2+atom_d/2, w0_rydberg, lambda_rydberg))/rabi
 for Omega_Rabi in Omega_Rabis:
     print('Omega:', Omega_Rabi / 2 / np.pi)
     H_gen1 = Hamiltonians(Omega_Rabi1=Omega_Rabi, blockade_inf=False, blockade=blockade_mrad, r_lifetime=R_lifetime,
@@ -235,17 +244,42 @@ for Omega_Rabi in Omega_Rabis:
     doppler_1photon.append(infids_doppler)
 
     infids_s1 = []
-    for d in ds:
-        blockade1 = find_blockade_Mrad(atom_name, n, d)
-        H_gen = Hamiltonians(Omega_Rabi1=Omega_Rabi, blockade_inf=False, blockade=blockade1, r_lifetime=1e10, Delta1=0,
-                             Stark1=0, Stark2=0, resolution=resolution, r_lifetime2=1e10, pulse_time=pulse_time)
-        fid, global_phi = H_gen.asym_return_fidel(phases=phase, dt=dt, omega1_scale=1, omega2_scale=1)
+    infids_blockade =[]
+    infids_rabi =[]
+    for rabi1, rabi2, d in zip(rabis1, rabis2, ds):
+        blockade = find_blockade_Mrad(atom_name, n, d)
+        # total
+        H_gen = Hamiltonians(Omega_Rabi1=Omega_Rabi, blockade_inf=False, blockade=blockade, r_lifetime=10e9, Delta1=0,
+                             Stark1=0, Stark2=0, resolution=resolution, r_lifetime2=10e9, pulse_time=pulse_time)
+        fid, global_phi = H_gen.asym_return_fidel(phases=phase, dt=dt, omega1_scale=rabi1, omega2_scale=rabi2)
         infids_s1.append(1 - fid)
 
-    infids_s1 = np.asarray(infids_s1)
-    infid_blockade =np.mean(infids_s1) - infid_TO1
-    infids_motion_blockade.append(infid_blockade)
+        H_gen_block = Hamiltonians(Omega_Rabi1=Omega_Rabi, blockade_inf=False, blockade=blockade, r_lifetime=10e9,
+                                   Delta1=0,
+                                   Stark1=0, Stark2=0, resolution=resolution, r_lifetime2=10e9, pulse_time=pulse_time)
+        fid, global_phi = H_gen_block.asym_return_fidel(phases=phase, dt=dt, omega1_scale=1, omega2_scale=1)
+        infids_blockade.append(1 - fid)
 
+        H_gen_rabi = Hamiltonians(Omega_Rabi1=Omega_Rabi, blockade_inf=False, blockade=blockade_mrad, r_lifetime=10e9,
+                                  Delta1=0,
+                                  Stark1=0, Stark2=0, resolution=resolution, r_lifetime2=10e9, pulse_time=pulse_time)
+        fid, global_phi = H_gen_rabi.asym_return_fidel(phases=phase, dt=dt, omega1_scale=rabi1, omega2_scale=rabi2)
+        infids_rabi.append(1 - fid)
+
+    infids_s1 = np.asarray(infids_s1)
+    infids_motion = np.mean(infids_s1) - infid_TO1
+    infids_motion_std = infids_s.std(ddof=1)
+
+    infids_blockade = np.asarray(infids_blockade)
+    infids_motion_blockade = np.mean(infids_blockade) - infid_TO1
+    infids_motion_blockade_std = infids_blockade.std(ddof=1)
+
+    infids_rabi = np.asarray(infids_rabi)
+    infids_motion_rabi = np.mean(infids_rabi) - infid_TO1
+    infids_motion_rabi_std = infids_rabi.std(ddof=1)
+
+    infids_motion_rabi1.append(infids_motion_rabi)
+    infids_motion_blockade1.append(infids_motion_blockade)
     H_gen1 = LeakageHamiltonians(Omega_Rabi1=Omega_Rabi, blockade_inf=False,
     blockade=blockade_mrad, r_lifetime=10e9,
                                  Delta1=0,
@@ -257,25 +291,28 @@ for Omega_Rabi in Omega_Rabis:
     leakage1.append(leakage_mj)
 
     scattering1.append(0)
-    total = infid_TO1+infid_blockade+leakage_mj+infids_detuning+v_contribution+RIN_contribution+infids_decay
+    total = infid_TO1+infids_motion_blockade+infids_motion_rabi+leakage_mj+infids_detuning+v_contribution+RIN_contribution+infids_decay
     print('total error:', total)
 
 v_1photon = np.array(v_1photon)
 RIN_1photon = np.array(RIN_1photon)
-infids_motion_blockade = np.array(infids_motion_blockade)
+infids_motion_blockade1 = np.array(infids_motion_blockade1)
+infids_motion_rabi1 = np.array(infids_motion_rabi1)
 E_1photon = np.array(E_1photon)
 B_1photon = np.array(B_1photon)
 doppler_1photon = np.array(doppler_1photon)
 decay_1photon = np.array(decay_1photon)
 leakage1 = np.array(leakage1)
-sum_1photon = v_1photon+ RIN_1photon+infids_motion_blockade+decay_1photon+leakage1+E_1photon+B_1photon+doppler_1photon
+
+sum_1photon = v_1photon+ RIN_1photon+infids_motion_blockade1+infids_motion_rabi1+decay_1photon+leakage1+E_1photon+B_1photon+doppler_1photon
 print('min infid:', min(sum_1photon))
 
 fig, ax = plt.subplots(figsize=(7,5))
 ax.plot(f_Rabis, v_1photon, c="#4e63ff", linewidth=2, label="$v$")
 ax.plot(f_Rabis, RIN_1photon, c="#ff4da6", linewidth=2, label="RIN")
 # ax.plot(f_Rabis,E_1photon, c="#ff4da6", linewidth=2)
-ax.plot(f_Rabis, infids_motion_blockade, c="#2ecc71", linewidth=2, label="$\delta V$")
+ax.plot(f_Rabis, infids_motion_blockade1, c="#2ecc71", linewidth=2, label="$\delta V$")
+ax.plot(f_Rabis, infids_motion_rabi1, linewidth=2, label='$\delta \Omega$')
 ax.plot(f_Rabis, decay_1photon, c="#7f8c8d", linewidth=2, label='$\gamma$')
 ax.plot(f_Rabis, sum_1photon, c="k", linewidth=4, label='$\Sigma$')
 # ax.plot(f_Rabis, scattering1, c='blue', linewidth=2)
@@ -354,10 +391,11 @@ raw_fig2 = dict(
     y=dict(
         vnoise=_to_jsonable(v_1photon),
         RIN=_to_jsonable(RIN_1photon),
-        motional=_to_jsonable(infids_motion_blockade),
+        blockade=_to_jsonable(infids_motion_blockade1),
         efield=_to_jsonable(E_1photon),
         bfield=_to_jsonable(B_1photon),
         doppler=_to_jsonable(doppler_1photon),
+        rabi=_to_jsonable(infids_motion_rabi1),
         decay=_to_jsonable(decay_1photon),
         leakage=_to_jsonable(np.array(leakage1)),
         scattering=_to_jsonable(np.array(scattering1)),
