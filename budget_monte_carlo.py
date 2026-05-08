@@ -22,7 +22,7 @@ epi0 = 8.854e-12
 bohr_r = 5.291e-11
 
 
-with open('blockades_symmetric.pkl', 'rb') as file:
+with open('blockades_symmetric_p.pkl', 'rb') as file:
     # Load the object from the file
     blockade_dict = pickle.load(file)
 

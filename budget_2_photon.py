@@ -91,7 +91,7 @@ elif atom_name == "Cs":
     atom = Caesium()
     n_g = 6
     w_qubit = 9192631770 * 2 * np.pi
-    with open('Cs-Cs-s-states-90-deg.pkl', 'rb') as file:
+    with open('blockades_symmetric_s.pkl', 'rb') as file:
         # Load the object from the file
         blockade2_dict = pickle.load(file)
 
