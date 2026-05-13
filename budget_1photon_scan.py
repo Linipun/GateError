@@ -43,30 +43,35 @@ resolution = 200 # number of phase steps in the pulse
 w0_rydberg = 20 #um
 lambda_rydberg = 0.319 #um
 
-HF_split = 700*np.pi*2 # MHz
+HF_split = 2000*np.pi*2 # MHz
 # HF_split = None #if mj=1/2 split is from B-field
 
 alpha_dc = 700 #MHz (V/cm)^-2
 alpha_dc = None
 
-T_atom = 5 #uK
+T_atom = 1 #uK
 trap_depth = 1000 #uK
 lambda_trap = 1.064 #um
-w0_trap = 1.2 #um
+w0_trap = 1 #um
 
-edc_fluc = 5e-3 #V/cm
+edc_fluc = 1e-3 #V/cm
 edc_zero = 0 #V/m
 
-bdc_fluc = 5e-3 #G
+bdc_fluc = 1e-3 #G
 
 num_samples =10000
 
-phase_noise_csv = "638_20MHz-2-2-2026.csv"
-RIN_csv_path = '319_Intensity_0.442VDC.csv'
-RIN_background_csv_path = 'UV_intensity_background.csv'
-intensity_DC_V = 0.442
+# phase_noise_csv = "638_20MHz-2-2-2026.csv"
+# RIN_csv_path = '319_Intensity_0.442VDC.csv'
+# RIN_background_csv_path = 'UV_intensity_background.csv'
+# intensity_DC_V = 0.442
 
-f_Rabis = np.linspace(2, 20, 20)
+intensity_dbc = -120
+intensity_range = 1e5 #Hz
+f_hz_hz2 = 220
+f_range = 1e5 # Hz
+
+f_Rabis = np.linspace(2, 40, 20)
 #### config #######
 
 
@@ -87,38 +92,38 @@ if alpha_dc is None:
     calc.diagonalise(np.linspace(0, 60, 600))
     alpha_dc = calc.getPolarizability(debugOutput=True)
 
-phase_noise_data = phase_noise.procData(phase_noise_csv, True, "638nm", range=20e6, p0=phase_noise.p0dict_638)
-label = phase_noise_data[1][1]
-vnoise_data = phase_noise_data[1][0]
-vnoise_fs = []
-vnoise_W = []
-for d in vnoise_data:
-    if d[0] >= 0:
-        vnoise_fs.append(d[0] / 1e6)
-        vnoise_W.append(d[1] * d[0] ** 2)
+# phase_noise_data = phase_noise.procData(phase_noise_csv, True, "638nm", range=20e6, p0=phase_noise.p0dict_638)
+# label = phase_noise_data[1][1]
+# vnoise_data = phase_noise_data[1][0]
+# vnoise_fs = []
+# vnoise_W = []
+# for d in vnoise_data:
+#     if d[0] >= 0:
+#         vnoise_fs.append(d[0] / 1e6)
+#         vnoise_W.append(d[1] * d[0] ** 2)
+#
+# print('fitted frequency noise')
+# vnoise_fs = np.array(vnoise_fs)
+# # vnoise_W = np.array(vnoise_W)
 
-print('fitted frequency noise')
-vnoise_fs = np.array(vnoise_fs)
-vnoise_W = np.array(vnoise_W)
-
-intensity_noise_csv = pd.read_csv(RIN_csv_path, header=None)
-background_noise_csv = pd.read_csv(RIN_background_csv_path, header=None)
-fs_intensity = intensity_noise_csv[0]
-RIN_db = intensity_noise_csv[1]
-fs_background = background_noise_csv[0]
-bg_db = background_noise_csv[1]
-rbw = fs_intensity[1] - fs_intensity[0]
-carrier_p = (intensity_DC_V ** 2 / 50 * 1e3)  # dBm
-
-bg_w = db_to_w(bg_db)
-raw_RIN_w = db_to_w(RIN_db)
-RIN_db_c = w_to_db(np.where((raw_RIN_w - bg_w) < 0, 1e-99, raw_RIN_w - bg_w))
-RIN_dbc = (RIN_db_c - w_to_db(carrier_p) - w_to_db(
-    rbw))  # convert to dBc/Hz= db(W_RIN/W_carrier/Hz) = db(W_RIN)-db(W_carrier)-db(Hz)
-
-RIN_W = db_to_w(RIN_dbc)
-fs_intensity = np.array(fs_intensity)
-RIN_W = np.array(RIN_W)
+# intensity_noise_csv = pd.read_csv(RIN_csv_path, header=None)
+# background_noise_csv = pd.read_csv(RIN_background_csv_path, header=None)
+# fs_intensity = intensity_noise_csv[0]
+# RIN_db = intensity_noise_csv[1]
+# fs_background = background_noise_csv[0]
+# bg_db = background_noise_csv[1]
+# rbw = fs_intensity[1] - fs_intensity[0]
+# carrier_p = (intensity_DC_V ** 2 / 50 * 1e3)  # dBm
+#
+# bg_w = db_to_w(bg_db)
+# raw_RIN_w = db_to_w(RIN_db)
+# RIN_db_c = w_to_db(np.where((raw_RIN_w - bg_w) < 0, 1e-99, raw_RIN_w - bg_w))
+# RIN_dbc = (RIN_db_c - w_to_db(carrier_p) - w_to_db(
+#     rbw))  # convert to dBc/Hz= db(W_RIN/W_carrier/Hz) = db(W_RIN)-db(W_carrier)-db(Hz)
+#
+# RIN_W = db_to_w(RIN_dbc)
+# fs_intensity = np.array(fs_intensity)
+# RIN_W = np.array(RIN_W)
 
 
 ## Linear Response ####
@@ -181,24 +186,33 @@ for Omega_Rabi in Omega_Rabis:
     # print(infid_TO1)
     TO_1.append(infid_TO1)
 
-    o_f = build_Oseq(phases=phase, dt=dt, B=blockade_mrad, is_intensity=False) 
+    o_f = build_Oseq(phases=phase, dt=dt, B=blockade_mrad, is_intensity=False)
     o_I = build_Oseq(phases=phase, dt=dt, B=blockade_mrad, is_intensity=True)
-    vnoise1_contribution = []
-    for i in range(len(vnoise_fs) - 1):
-        deltaf = vnoise_fs[i + 1] - vnoise_fs[i]
-        #
-        If_1 = response_G13(o_f, S_haar, vnoise_fs[i] * 2 * np.pi / Omega_Rabi, dt=dt) / Omega_Rabi ** 2
-        vnoise1_contribution.append(If_1 * vnoise_W[i] * deltaf / 1e6)
-    v_contribution = np.sum(vnoise1_contribution)
-    v_1photon.append(v_contribution)
+    # vnoise1_contribution = []
+    # for i in range(len(vnoise_fs) - 1):
+    #     deltaf = vnoise_fs[i + 1] - vnoise_fs[i]
+    #     #
+    #     If_1 = response_G13(o_f, S_haar, vnoise_fs[i] * 2 * np.pi / Omega_Rabi, dt=dt) / Omega_Rabi ** 2
+    #     vnoise1_contribution.append(If_1 * vnoise_W[i] * deltaf / 1e6)
+    # v_contribution = np.sum(vnoise1_contribution)
+    # v_1photon.append(v_contribution)
+    #
+    # Inoise1_contribution = []
+    # for i in range(len(fs_intensity) - 2):
+    #     deltaf = fs_intensity[i + 2] - fs_intensity[i + 1]
+    #     Ii = response_G13(o_I, S_haar, fs_intensity[i + 2] * 2 * np.pi / 1e6 / Omega_Rabi, dt=dt)
+    #     Inoise1_contribution.append(Ii * RIN_W[i + 2] * deltaf)
+    # RIN_contribution = np.sum(Inoise1_contribution)
+    # RIN_1photon.append(RIN_contribution)
 
-    Inoise1_contribution = []
-    for i in range(len(fs_intensity) - 2):
-        deltaf = fs_intensity[i + 2] - fs_intensity[i + 1]
-        Ii = response_G13(o_I, S_haar, fs_intensity[i + 2] * 2 * np.pi / 1e6 / Omega_Rabi, dt=dt)
-        Inoise1_contribution.append(Ii * RIN_W[i + 2] * deltaf)
-    RIN_contribution = np.sum(Inoise1_contribution)
+    intensity_w = db_to_w(intensity_dbc)
+    Ii = response_G13(o_I, S_haar, 0, dt=dt)
+    RIN_contribution = Ii * intensity_w * intensity_range
     RIN_1photon.append(RIN_contribution)
+
+    If_1 = response_G13(o_f, S_haar, 0, dt=dt) / Omega_Rabi ** 2
+    v_contribution = If_1 * f_hz_hz2 * f_range / 1e6 / 1e6
+    v_1photon.append(v_contribution)
 
 
     infids_decay = (2.95 / (Omega_Rabi)) / R_lifetime

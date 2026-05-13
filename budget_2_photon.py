@@ -5,6 +5,7 @@ import pickle
 import scipy.optimize as opt
 import scipy
 from budget_monte_carlo import *
+from budget_monte_carlo import db_to_w
 from linear_response_2photon import response_2photon, build_Oseq_2photon, O2photon_I1, O2photon_I2, O2photon_nu1, O2photon_nu2
 from linear_response import build_Oseq, response_G13, isometry_haar_full
 import phase_noise #import procData, p0dict_638
@@ -71,12 +72,15 @@ num_samples =10000
 pol_dc = 282
 
 
-phase_noise_csv = "638_20MHz-2-2-2026.csv"
-RIN_csv_path = '319_Intensity_0.442VDC.csv'
-RIN_background_csv_path = 'UV_intensity_background.csv'
-intensity_DC_V = 0.442
+# phase_noise_csv = "638_20MHz-2-2-2026.csv"
+# RIN_csv_path = '319_Intensity_0.442VDC.csv'
+# RIN_background_csv_path = 'UV_intensity_background.csv'
+# intensity_DC_V = 0.442
 
-
+intensity_dbc = -120
+intensity_range = 1e5 #Hz
+f_hz_hz2 = 220
+f_range = 1e5 # Hz
 
 
 if atom_name == "Rb":
@@ -325,70 +329,76 @@ for Omega_Rabi in Omega_Rabis:
     # print('error due to Rydberg decay:', loss_decay)
     decay_2photon.append(loss_decay)
 
-    phase_noise_data = phase_noise.procData(phase_noise_csv, True, "638nm", range=20e6, p0=phase_noise.p0dict_638)
-    label = phase_noise_data[1][1]
-    vnoise_data = phase_noise_data[1][0]
-    vnoise_fs = []
-    vnoise_W = []
-    for d in vnoise_data:
-        if d[0] >=0:
-            vnoise_fs.append(d[0]/1e6)
-            vnoise_W.append(d[1]*d[0]**2)
+    # phase_noise_data = phase_noise.procData(phase_noise_csv, True, "638nm", range=20e6, p0=phase_noise.p0dict_638)
+    # label = phase_noise_data[1][1]
+    # vnoise_data = phase_noise_data[1][0]
+    # vnoise_fs = []
+    # vnoise_W = []
+    # for d in vnoise_data:
+    #     if d[0] >=0:
+    #         vnoise_fs.append(d[0]/1e6)
+    #         vnoise_W.append(d[1]*d[0]**2)
 
-    vnoise_fs= np.array(vnoise_fs)
-    vnoise_W = np.array(vnoise_W)
+    # vnoise_fs= np.array(vnoise_fs)
+    # vnoise_W = np.array(vnoise_W)
     S_haar = isometry_haar_full()   # D=4
     T = 2 * np.pi * 1.215 /Omega_Rabi
     t_real = np.linspace(0.0, T, resolution)
     dt_real = t_real[1] - t_real[0]
     oOseq_nu1 = build_Oseq_2photon(phases=phase, dt=dt_real, B=blockade_mrad, Omega1=Omega1_0, Omega2=Omega2_0, delta1=delta1,
                                 delta2=delta2, Delta=Delta, inter_detuning=inter_detuning, n=n, Oinst_func=O2photon_nu1)
-    vnoise_contribution = []
-    for i in range(len(vnoise_fs)-1):
-        deltaf = vnoise_fs[i+1]-vnoise_fs[i]
-        If_2p_1 = response_2photon(oOseq_nu1, S_haar, vnoise_fs[i]*2*np.pi, dt_real)
-        vnoise_contribution.append((If_2p_1*2)*vnoise_W[i]*deltaf/1e6)
-    vnoise_error= np.sum(vnoise_contribution)
+    # vnoise_contribution = []
+    # for i in range(len(vnoise_fs)-1):
+    #     deltaf = vnoise_fs[i+1]-vnoise_fs[i]
+    #     If_2p_1 = response_2photon(oOseq_nu1, S_haar, vnoise_fs[i]*2*np.pi, dt_real)
+    #     vnoise_contribution.append((If_2p_1*2)*vnoise_W[i]*deltaf/1e6)
+    # vnoise_error= np.sum(vnoise_contribution)
     # print('error due to laser phase noise:', vnoise_error)
+    If_2p_1 = response_2photon(oOseq_nu1, S_haar, 0, dt_real)
+    vnoise_error = If_2p_1*2*f_hz_hz2*f_range/1e6
     v_2photon.append(vnoise_error)
 
-    intensity_noise_csv = pd.read_csv(RIN_csv_path, header=None)
-    background_noise_csv = pd.read_csv(RIN_background_csv_path, header=None)
-    fs_intensity = intensity_noise_csv[0]
-    RIN_db = intensity_noise_csv[1]
-    fs_background = background_noise_csv[0]
-    bg_db = background_noise_csv[1]
-    rbw = fs_intensity[1]-fs_intensity[0]
-    carrier_p = (intensity_DC_V**2/50*1e3) #dBm
+    # intensity_noise_csv = pd.read_csv(RIN_csv_path, header=None)
+    # background_noise_csv = pd.read_csv(RIN_background_csv_path, header=None)
+    # fs_intensity = intensity_noise_csv[0]
+    # RIN_db = intensity_noise_csv[1]
+    # fs_background = background_noise_csv[0]
+    # bg_db = background_noise_csv[1]
+    # rbw = fs_intensity[1]-fs_intensity[0]
+    # carrier_p = (intensity_DC_V**2/50*1e3) #dBm
 
-    bg_w = db_to_w(bg_db)
-    raw_RIN_w = db_to_w(RIN_db)
-    RIN_db_c = w_to_db(np.where((raw_RIN_w-bg_w)<0,1e-99,raw_RIN_w-bg_w))
-    RIN_dbc = (RIN_db_c-w_to_db(carrier_p)-w_to_db(rbw)) #convert to dBc/Hz= db(W_RIN/W_carrier/Hz) = db(W_RIN)-db(W_carrier)-db(Hz)
+    # bg_w = db_to_w(bg_db)
+    # raw_RIN_w = db_to_w(RIN_db)
+    # RIN_db_c = w_to_db(np.where((raw_RIN_w-bg_w)<0,1e-99,raw_RIN_w-bg_w))
+    # RIN_dbc = (RIN_db_c-w_to_db(carrier_p)-w_to_db(rbw)) #convert to dBc/Hz= db(W_RIN/W_carrier/Hz) = db(W_RIN)-db(W_carrier)-db(Hz)
 
     # fig , ax = plt.subplots(ncols=2)
     # ax[0].plot(fs_intensity, RIN_dbc)
     # ax[0].plot(fs_intensity, RIN_db)
-    RIN_W = db_to_w(RIN_dbc)
-    fs_intensity = np.array(fs_intensity)
-    RIN_W = np.array(RIN_W)
-    RIN_contribution = []
+    # RIN_W = db_to_w(RIN_dbc)
+    # fs_intensity = np.array(fs_intensity)
+    # RIN_W = np.array(RIN_W)
+    # RIN_contribution = []
     oOseq_I1 = build_Oseq_2photon(phases=phase, dt=dt_real, B=blockade_mrad, Omega1=Omega1_0, Omega2=Omega2_0, delta1=delta1,
                         delta2=delta2, Delta=Delta, inter_detuning=inter_detuning, n=n, Oinst_func=O2photon_I1)
     oOseq_I2 = build_Oseq_2photon(phases=phase, dt=dt_real, B=blockade_mrad, Omega1=Omega1_0, Omega2=Omega2_0, delta1=delta1,
                         delta2=delta2, Delta=Delta, inter_detuning=inter_detuning, n=n, Oinst_func=O2photon_I2)
 
-    RIN_contribution = []
+    # RIN_contribution = []
     # fs  = np.linspace(0,15,500)
     # for f in fs:
-    for i in range(len(fs_intensity)-2):
-        deltaf = fs_intensity[i+2]-fs_intensity[i+1]
-        Ii_2p_1 = response_2photon(oOseq_I1, S_haar, fs_intensity[i+2]*2*np.pi/1e6, dt_real)
-        Ii_2p_2 = response_2photon(oOseq_I2, S_haar, fs_intensity[i+2]*2*np.pi/1e6, dt_real)
-        RIN_contribution.append((Ii_2p_1+Ii_2p_2)*RIN_W[i+2]*deltaf)
-
-    RIN_error = np.sum(RIN_contribution)
+    # for i in range(len(fs_intensity)-2):
+    #     deltaf = fs_intensity[i+2]-fs_intensity[i+1]
+    #     Ii_2p_1 = response_2photon(oOseq_I1, S_haar, fs_intensity[i+2]*2*np.pi/1e6, dt_real)
+    #     Ii_2p_2 = response_2photon(oOseq_I2, S_haar, fs_intensity[i+2]*2*np.pi/1e6, dt_real)
+    #     RIN_contribution.append((Ii_2p_1+Ii_2p_2)*RIN_W[i+2]*deltaf)
+    #
+    # RIN_error = np.sum(RIN_contribution)
     # print('error due to RIN:', RIN_error)
+
+    Ii_2p_1 = response_2photon(oOseq_I1, S_haar, 0, dt_real)
+    Ii_2p_2 = response_2photon(oOseq_I2, S_haar, 0, dt_real)
+    RIN_error = Ii_2p_1+Ii_2p_2*db_to_w(intensity_dbc)*intensity_range
     RIN_2photon.append(RIN_error)
 
     total_error = vnoise_error + RIN_error + infids_motion + loss_decay  +  infids_edc + infids_bdc+ infids_doppler + scattering_e
