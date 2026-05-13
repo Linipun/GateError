@@ -388,9 +388,9 @@ config = dict(
     edc_zero_V_per_m=float(edc_zero),
     bdc_fluc_G=float(bdc_fluc),
     num_samples=int(num_samples),
-    phase_noise_csv=str(phase_noise_csv),
-    RIN_csv_path=str(RIN_csv_path),
-    RIN_background_csv_path=str(RIN_background_csv_path),
+    phase_noise_csv=f_hz_hz2,#str(phase_noise_csv),
+    RIN_csv_path=intensity_dbc,#str(RIN_csv_path),
+    RIN_background_csv_path=intensity_range,#str(RIN_background_csv_path),
     intensity_DC_V=float(intensity_DC_V),
     f_Rabi_scan_MHz=dict(start=float(f_Rabis[0]), stop=float(f_Rabis[-1]), num=int(len(f_Rabis))),
     derived=dict(

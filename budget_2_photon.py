@@ -355,7 +355,7 @@ for Omega_Rabi in Omega_Rabis:
     # vnoise_error= np.sum(vnoise_contribution)
     # print('error due to laser phase noise:', vnoise_error)
     If_2p_1 = response_2photon(oOseq_nu1, S_haar, 0, dt_real)
-    vnoise_error = If_2p_1*2*f_hz_hz2*f_range/1e6
+    vnoise_error = If_2p_1*2*f_hz_hz2*f_range/1e6/1e6
     v_2photon.append(vnoise_error)
 
     # intensity_noise_csv = pd.read_csv(RIN_csv_path, header=None)
@@ -398,9 +398,11 @@ for Omega_Rabi in Omega_Rabis:
 
     Ii_2p_1 = response_2photon(oOseq_I1, S_haar, 0, dt_real)
     Ii_2p_2 = response_2photon(oOseq_I2, S_haar, 0, dt_real)
-    RIN_error = Ii_2p_1+Ii_2p_2*db_to_w(intensity_dbc)*intensity_range
+    RIN_error = (Ii_2p_1+Ii_2p_2)*db_to_w(intensity_dbc)*intensity_range
     RIN_2photon.append(RIN_error)
-
+    print('RIN:', RIN_error)
+    print('v noise:', vnoise_error
+          )
     total_error = vnoise_error + RIN_error + infids_motion + loss_decay  +  infids_edc + infids_bdc+ infids_doppler + scattering_e
     print(Omega_Rabi, total_error)
 
@@ -485,9 +487,9 @@ config = dict(
     edc_zero_V_per_m=float(edc_zero),
     bdc_fluc_G=float(bdc_fluc),
     num_samples=int(num_samples),
-    phase_noise_csv=str(phase_noise_csv),
-    RIN_csv_path=str(RIN_csv_path),
-    RIN_background_csv_path=str(RIN_background_csv_path),
+    phase_noise_csv=f_hz_hz2,#str(phase_noise_csv),
+    RIN_csv_path=intensity_dbc,#str(RIN_csv_path),
+    RIN_background_csv_path=intensity_range,#str(RIN_background_csv_path),
     intensity_DC_V=float(intensity_DC_V),
     f_Rabi_scan_MHz=dict(start=float(f_Rabis[0]), stop=float(f_Rabis[-1]), num=int(len(f_Rabis))),
     derived=dict(
