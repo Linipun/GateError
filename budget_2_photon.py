@@ -58,10 +58,10 @@ w0_rydberg1 = 10 #um
 lambda_rydberg1 = 1.038 #um
 # HF_split = 500*np.pi*2 # MHz
 
-T_atom = 5 #uK
+T_atom = 1 #uK
 trap_depth = 1000 #uK
 lambda_trap = 1.064 #um
-w0_trap = 1.2 #um
+w0_trap = 1 #um
 
 edc_fluc = 1e-3 #V/cm
 edc_zero = 0 #V/m
@@ -321,7 +321,7 @@ for Omega_Rabi in Omega_Rabis:
         psi = scipy.linalg.expm(-1j * H0 * scatter_dt) @ psi
         psi_no = scipy.linalg.expm(-1j * H0_no * scatter_dt) @ psi_no
     # scattering_e = 0.95/Omega_Rabi/tau_7p*Omega1_0**2/(inter_detuning+w_qubit)**2 + 0.95/Omega_Rabi/tau_7p*(Omega1_0**2+Omega2_0**2)/(inter_detuning)**2+0.12/Omega_Rabi/tau_7p*(Omega1_0**2-Omega2_0**2)/(inter_detuning)**2
-    scattering_e =  abs(psi_no[0] ** 2) - abs(psi[0] ** 2)
+    scattering_e =  sum(np.abs(psi_no**2))-sum(np.abs(psi**2))
     # print('error due to scattering:', scattering_e)
     scattering2.append(scattering_e)
 
