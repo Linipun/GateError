@@ -66,8 +66,7 @@ num_samples =10000
 # RIN_background_csv_path = 'UV_intensity_background.csv'
 # intensity_DC_V = 0.442
 
-intensity_dbc = -120
-intensity_range = 1e5 #Hz
+rin_strength = 1e-4
 f_hz_hz2 = 220
 f_range = 1e5 # Hz
 
@@ -207,7 +206,7 @@ for Omega_Rabi in Omega_Rabis:
 
     intensity_w = db_to_w(intensity_dbc)
     Ii = response_G13(o_I, S_haar, 0, dt=dt)
-    RIN_contribution = Ii * intensity_w * intensity_range
+    RIN_contribution = Ii * rin_strength
     RIN_1photon.append(RIN_contribution)
 
     If_1 = response_G13(o_f, S_haar, 0, dt=dt) / Omega_Rabi ** 2
@@ -389,9 +388,10 @@ config = dict(
     bdc_fluc_G=float(bdc_fluc),
     num_samples=int(num_samples),
     phase_noise_csv=f_hz_hz2,#str(phase_noise_csv),
-    RIN_csv_path=intensity_dbc,#str(RIN_csv_path),
-    RIN_background_csv_path=intensity_range,#str(RIN_background_csv_path),
+    # RIN_csv_path=intensity_dbc,#str(RIN_csv_path),
+    # RIN_background_csv_path=intensity_range,#str(RIN_background_csv_path),
     # intensity_DC_V=float(intensity_DC_V),
+    RIN_strength=rin_strength,
     f_Rabi_scan_MHz=dict(start=float(f_Rabis[0]), stop=float(f_Rabis[-1]), num=int(len(f_Rabis))),
     derived=dict(
         blockade_mrad=float(blockade_mrad),

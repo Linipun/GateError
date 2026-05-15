@@ -70,15 +70,14 @@ bdc_fluc = 1e-3 #G
 num_samples =10000
 
 pol_dc = 282
-
+pol_dc = None
 
 # phase_noise_csv = "638_20MHz-2-2-2026.csv"
 # RIN_csv_path = '319_Intensity_0.442VDC.csv'
 # RIN_background_csv_path = 'UV_intensity_background.csv'
 # intensity_DC_V = 0.442
 
-intensity_dbc = -120
-intensity_range = 1e5 #Hz
+rin_strength = 1e-4
 f_hz_hz2 = 220
 f_range = 1e5 # Hz
 
@@ -383,7 +382,8 @@ for Omega_Rabi in Omega_Rabis:
                         delta2=delta2, Delta=Delta, inter_detuning=inter_detuning, n=n, Oinst_func=O2photon_I1)
     oOseq_I2 = build_Oseq_2photon(phases=phase, dt=dt_real, B=blockade_mrad, Omega1=Omega1_0, Omega2=Omega2_0, delta1=delta1,
                         delta2=delta2, Delta=Delta, inter_detuning=inter_detuning, n=n, Oinst_func=O2photon_I2)
-
+    Ii_2p_1 = response_2photon(oOseq_I1, S_haar, 0, dt_real)
+    Ii_2p_2 = response_2photon(oOseq_I2, S_haar, 0, dt_real)
     # RIN_contribution = []
     # fs  = np.linspace(0,15,500)
     # for f in fs:
@@ -396,9 +396,8 @@ for Omega_Rabi in Omega_Rabis:
     # RIN_error = np.sum(RIN_contribution)
     # print('error due to RIN:', RIN_error)
 
-    Ii_2p_1 = response_2photon(oOseq_I1, S_haar, 0, dt_real)
-    Ii_2p_2 = response_2photon(oOseq_I2, S_haar, 0, dt_real)
-    RIN_error = (Ii_2p_1+Ii_2p_2)*db_to_w(intensity_dbc)*intensity_range
+
+    RIN_error = (Ii_2p_1+Ii_2p_2)*rin_strength
     RIN_2photon.append(RIN_error)
     print('RIN:', RIN_error)
     print('v noise:', vnoise_error
@@ -487,10 +486,11 @@ config = dict(
     edc_zero_V_per_m=float(edc_zero),
     bdc_fluc_G=float(bdc_fluc),
     num_samples=int(num_samples),
-    phase_noise_csv=f_hz_hz2,#str(phase_noise_csv),
-    RIN_csv_path=intensity_dbc,#str(RIN_csv_path),
-    RIN_background_csv_path=intensity_range,#str(RIN_background_csv_path),
-    intensity_DC_V=float(intensity_DC_V),
+    phase_noise_csv=f_hz_hz2*f_range,#str(phase_noise_csv),
+    # RIN_csv_path=intensity_dbc,#str(RIN_csv_path),
+    # RIN_background_csv_path=intensity_range,#str(RIN_background_csv_path),
+    RIN_strength=rin_strength,
+    # intensity_DC_V=float(intensity_DC_V),
     f_Rabi_scan_MHz=dict(start=float(f_Rabis[0]), stop=float(f_Rabis[-1]), num=int(len(f_Rabis))),
     derived=dict(
         blockade_mrad=float(blockade_mrad),
