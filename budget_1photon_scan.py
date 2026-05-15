@@ -29,49 +29,49 @@ os.makedirs(result,exist_ok=True)
 #### config #######
 atom_name = 'Cs'
 arg = eval('['+sys.argv[1]+']')
-n =  int(arg[0])
 l = 1
 j = 3/2
 mj = 3/2
+pulse_time= 7.65 #Omega_Rabi
+resolution = 200 # number of phase steps in the pulse
+lambda_rydberg = 0.319 #um
+HF_split = 2000*np.pi*2 # MHz
+alpha_dc = 700 #MHz (V/cm)^-2
+alpha_dc = None
+T_atom = 1 #uK
+lambda_trap = 1.064 #um
+w0_trap = 1 #um
+edc_fluc = 1e-3 #V/cm
+edc_zero = 0 #V/m
+bdc_fluc = 1e-3 #G
+num_samples =10000
+rin_strength = 1e-4
+f_hz_hz2 = 220
+f_range = 1e5 # Hz
+#### config #######
 
+
+### parameters ####
+n =  int(arg[0])
 atom_d = arg[1] #um
 Omega_Rabi= 10*2*np.pi  #MHz
 Bz = 10 #G
-pulse_time= 7.65 #Omega_Rabi
-resolution = 200 # number of phase steps in the pulse
-
 w0_rydberg = 20 #um
-lambda_rydberg = 0.319 #um
-
-HF_split = 2000*np.pi*2 # MHz
-# HF_split = None #if mj=1/2 split is from B-field
-
-alpha_dc = 700 #MHz (V/cm)^-2
-alpha_dc = None
-
-T_atom = 1 #uK
 trap_depth = 1000 #uK
-lambda_trap = 1.064 #um
-w0_trap = 1 #um
+### parameters ####
 
-edc_fluc = 1e-3 #V/cm
-edc_zero = 0 #V/m
 
-bdc_fluc = 1e-3 #G
 
-num_samples =10000
 
 # phase_noise_csv = "638_20MHz-2-2-2026.csv"
 # RIN_csv_path = '319_Intensity_0.442VDC.csv'
 # RIN_background_csv_path = 'UV_intensity_background.csv'
 # intensity_DC_V = 0.442
 
-rin_strength = 1e-4
-f_hz_hz2 = 220
-f_range = 1e5 # Hz
+
 
 f_Rabis = np.linspace(2, 40, 20)
-#### config #######
+
 
 
 if atom_name == "Rb":
