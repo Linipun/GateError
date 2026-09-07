@@ -35,19 +35,31 @@ mj = 3/2
 pulse_time= 7.65 #Omega_Rabi
 resolution = 200 # number of phase steps in the pulse
 lambda_rydberg = 0.319 #um
-HF_split = 2000*np.pi*2 # MHz
+# Effective detuning of the nP3/2 mj=1/2 leakage state from the mj=3/2 gate state, in rad/us.
+# Not a hyperfine splitting: a pi-polarised microwave resonantly dresses mj=1/2 with (n+1)S1/2
+# mj=1/2 (mj=3/2 is untouched -- S1/2 has no mj=3/2 sublevel) and pushes it out of resonance.
+# NOTE this must be the effective detuning Delta_eff = [sum_k |<P|k>|^2 / delta_k^2]^(-1/2)
+# over the *dressed* branches k, NOT Omega_mw/2: nP3/2 sits midway between nS and (n+1)S
+# (delta_S - delta_P = 0.49), so the microwave is only ~184 MHz from the P->nS transition and
+# the dressing is three-level.  Delta_eff = 2pi*1.5 GHz already needs Omega_mw/2pi ~ 2.8 GHz.
+# Set to None for the undressed (no-microwave) limit, i.e. bare Zeeman splitting only.
+HF_split = 2000*np.pi*2 # rad/us
+HF_split = None
 alpha_dc = 700 #MHz (V/cm)^-2
 alpha_dc = None
-T_atom = 1 #uK
+T_atom = 15 #uK
 lambda_trap = 1.064 #um
-w0_trap = 1 #um
-edc_fluc = 1e-3 #V/cm
+w0_trap = 1.2 #um
+edc_fluc = 10e-3 #V/cm
 edc_zero = 0 #V/m
 bdc_fluc = 1e-3 #G
 num_samples =10000
-rin_strength = 1e-4
+rin_strength = 1e-3
 f_hz_hz2 = 220
 f_range = 1e5 # Hz
+efield_fluc_on = True   # add a FLUCTUATING (broadband, no-DC-bias) E-field channel?
+edc_fluc_fast  = 12.5e-3   # V/cm, RMS of the broadband E-field noise
+efield_range   = 2e6    # Hz, bandwidth of the E-field noise; quadratic Stark -> detuning noise up to 2*efield_range
 #### config #######
 
 
@@ -56,8 +68,8 @@ n =  int(arg[0])
 atom_d = arg[1] #um
 Omega_Rabi= 10*2*np.pi  #MHz
 Bz = 10 #G
-w0_rydberg = 20 #um
-trap_depth = 1000 #uK
+w0_rydberg = 7.5 #um
+trap_depth = 450 #uK
 ### parameters ####
 
 
@@ -71,7 +83,7 @@ trap_depth = 1000 #uK
 
 
 f_Rabis = np.linspace(2, 40, 20)
-
+f_Rabis = np.array([1.5])
 
 
 if atom_name == "Rb":
@@ -140,6 +152,7 @@ infids_motion_rabi1 = []
 leakage1 = []
 scattering1 = []
 rabi_1photon = []
+efield_fluc_1photon = []
 
 Omega_Rabis = 2 * np.pi * f_Rabis
 sigma_r = sigma_r_um(T_atom, trap_depth, w0_trap)
@@ -185,8 +198,8 @@ for Omega_Rabi in Omega_Rabis:
     # print(infid_TO1)
     TO_1.append(infid_TO1)
 
-    o_f = build_Oseq(phases=phase, dt=dt, B=blockade_mrad, is_intensity=False)
-    o_I = build_Oseq(phases=phase, dt=dt, B=blockade_mrad, is_intensity=True)
+    o_f = build_Oseq(phases=phase, dt=dt, B=blockade_mrad/Omega_Rabi, is_intensity=False)
+    o_I = build_Oseq(phases=phase, dt=dt, B=blockade_mrad/Omega_Rabi, is_intensity=True)
     # vnoise1_contribution = []
     # for i in range(len(vnoise_fs) - 1):
     #     deltaf = vnoise_fs[i + 1] - vnoise_fs[i]
@@ -204,7 +217,7 @@ for Omega_Rabi in Omega_Rabis:
     # RIN_contribution = np.sum(Inoise1_contribution)
     # RIN_1photon.append(RIN_contribution)
 
-    intensity_w = db_to_w(intensity_dbc)
+    # intensity_w = db_to_w(intensity_dbc)
     Ii = response_G13(o_I, S_haar, 0, dt=dt)
     RIN_contribution = Ii * rin_strength
     RIN_1photon.append(RIN_contribution)
@@ -213,12 +226,33 @@ for Omega_Rabi in Omega_Rabis:
     v_contribution = If_1 * f_hz_hz2 * f_range / 1e6 / 1e6
     v_1photon.append(v_contribution)
 
+    # Fluctuating BROADBAND E-field, NO DC bias -> quadratic Stark: delta(t) = 1/2 alpha E(t)^2.
+    # A broadband field (flat up to efield_range) gives a broadband DETUNING noise (up to ~2*efield_range
+    # from the frequency doubling). Integrate the detuning response I(omega) over the band, so the result
+    # does NOT hinge on a single tone landing on a resonance of I(omega/Omega). Couples through the same
+    # detuning operator o_f as the laser frequency noise (both shift the |1>-|r> detuning).
+    if efield_fluc_on:
+        dnu_rms = 0.5 * alpha_dc * edc_fluc_fast ** 2 * 1e6          # RMS Stark detuning [Hz] from edc_fluc_fast
+        f_hi = 2.0 * efield_range                                    # detuning spectrum extends to ~2*bandwidth
+        fs_E = np.linspace(f_hi / 40, f_hi, 40)                      # Hz, detuning-frequency grid
+        S_delta = dnu_rms ** 2 / f_hi                               # flat detuning PSD [Hz^2/Hz]
+        dfE = fs_E[1] - fs_E[0]
+        efield_fluc_contribution = 0.0
+        for fE in fs_E:
+            omg = 2 * np.pi * fE / 1e6 / Omega_Rabi                 # normalized detuning freq  omega/Omega
+            I_w = response_G13(o_f, S_haar, omg, dt=dt) / Omega_Rabi ** 2
+            efield_fluc_contribution += I_w * S_delta * dfE / 1e6 / 1e6
+    else:
+        efield_fluc_contribution = 0.0
+    efield_fluc_1photon.append(efield_fluc_contribution)
+
 
     infids_decay = (2.95 / (Omega_Rabi)) / R_lifetime
     decay_1photon.append(infids_decay)
 
 
-    doppler_shift = 1 / lambda_trap / 1e-6 * np.sqrt(kb * (T_atom * 1e-6) / m_atom)
+    # k_eff = 2*pi/lambda of the Rydberg beam (single 319 nm photon), in rad/s to match delta_edc/delta_bdc
+    doppler_shift = 2 * np.pi / (lambda_rydberg * 1e-6) * np.sqrt(kb * (T_atom * 1e-6) / m_atom)
     # print('doppler shift:', doppler_shift / 2 / np.pi, 'Hz')
 
     delta_edc = abs(-1 / 2 * alpha_dc * 1e6 * ((edc_zero + edc_fluc) ** 2 - edc_zero ** 2)) * 2 * np.pi
@@ -229,7 +263,7 @@ for Omega_Rabi in Omega_Rabis:
 
     total_shift = np.sqrt(delta_bdc ** 2 + delta_edc ** 2 + doppler_shift ** 2)
     # print('Total DC detuning fluctuation:', total_shift / 2 / np.pi, 'Hz')
-    detunings = total_shift / 1e6 / Omega_Rabi
+    detunings = total_shift / 1e6
     # print('delta/Ω:', detunings)
     # print('==============')
     infids_s = []
@@ -303,8 +337,9 @@ for Omega_Rabi in Omega_Rabis:
     leakage_mj = (1 - fid_with_leak) - infid_TO1
     leakage1.append(leakage_mj)
 
-    scattering1.append(0)
-    total = infid_TO1+infids_motion_blockade+infids_motion_rabi+leakage_mj+infids_detuning+v_contribution+RIN_contribution+infids_decay
+    # Off-resonant / photoionization scattering is NOT modelled; this is a placeholder, not a computed bound.
+    scattering1.append(np.nan)
+    total = infid_TO1+infids_motion_blockade+infids_motion_rabi+leakage_mj+infids_detuning+v_contribution+RIN_contribution+infids_decay+efield_fluc_contribution
     print('total error:', total)
 
 v_1photon = np.array(v_1photon)
@@ -316,9 +351,14 @@ B_1photon = np.array(B_1photon)
 doppler_1photon = np.array(doppler_1photon)
 decay_1photon = np.array(decay_1photon)
 leakage1 = np.array(leakage1)
+TO_1 = np.array(TO_1)
+efield_fluc_1photon = np.array(efield_fluc_1photon)
 
-sum_1photon = v_1photon+ RIN_1photon+infids_motion_blockade1+infids_motion_rabi1+decay_1photon+leakage1+E_1photon+B_1photon+doppler_1photon
-print('min infid:', min(sum_1photon))
+# TO_1 is the intrinsic finite-blockade error; it is the baseline subtracted from every other
+# channel, so it must be added back here. Scattering is not modelled and is excluded.
+# efield_fluc_1photon is 0 when efield_fluc_on is False, so it is safe to always include here.
+sum_1photon = TO_1+v_1photon+ RIN_1photon+infids_motion_blockade1+infids_motion_rabi1+decay_1photon+leakage1+E_1photon+B_1photon+doppler_1photon+efield_fluc_1photon
+print('min infid:', min(sum_1photon), '(scattering not included)')
 
 fig, ax = plt.subplots(figsize=(7,5))
 ax.plot(f_Rabis, v_1photon, c="#4e63ff", linewidth=2, label="$v$")
@@ -327,10 +367,12 @@ ax.plot(f_Rabis, RIN_1photon, c="#ff4da6", linewidth=2, label="RIN")
 ax.plot(f_Rabis, infids_motion_blockade1, c="#2ecc71", linewidth=2, label="$\delta V$")
 ax.plot(f_Rabis, infids_motion_rabi1, linewidth=2, label='$\delta \Omega$')
 ax.plot(f_Rabis, decay_1photon, c="#7f8c8d", linewidth=2, label='$\gamma$')
+ax.plot(f_Rabis, TO_1, c="#b06ae2", linewidth=2, label='TO')
 ax.plot(f_Rabis, sum_1photon, c="k", linewidth=4, label='$\Sigma$')
 # ax.plot(f_Rabis, scattering1, c='blue', linewidth=2)
 ax.plot(f_Rabis, leakage1, linewidth=2, label='leakage')
 ax.plot(f_Rabis, E_1photon, linewidth=2, label='E')
+ax.plot(f_Rabis, efield_fluc_1photon, linewidth=2, linestyle='--', label='E-fluc')
 ax.plot(f_Rabis, B_1photon, linewidth=2, label='B')
 ax.plot(f_Rabis, doppler_1photon, linewidth=2, label='doppler')
 ax.axhline(1e-3, c='k', linestyle=":")
@@ -377,13 +419,16 @@ config = dict(
     resolution=int(resolution),
     w0_rydberg_um=float(w0_rydberg),
     lambda_rydberg_um=float(lambda_rydberg),
-    HF_split_MHz=float(HF_split) if HF_split is not None else None,
+    mj_leak_split_MHz=float(HF_split) / (2 * np.pi) if HF_split is not None else None,  # HF_split is rad/us
     alpha_dc_MHz_per_Vcm2=float(alpha_dc) if alpha_dc is not None else None,
     T_atom_uK=float(T_atom),
     trap_depth_uK=float(trap_depth),
     lambda_trap_um=float(lambda_trap),
     w0_trap_um=float(w0_trap),
     edc_fluc_V_per_cm=float(edc_fluc),
+    edc_fluc_fast_V_per_cm=float(edc_fluc_fast),
+    efield_range_Hz=float(efield_range),
+    efield_fluc_on=bool(efield_fluc_on),
     edc_zero_V_per_m=float(edc_zero),
     bdc_fluc_G=float(bdc_fluc),
     num_samples=int(num_samples),
@@ -407,12 +452,14 @@ raw_fig2 = dict(
         RIN=_to_jsonable(RIN_1photon),
         blockade=_to_jsonable(infids_motion_blockade1),
         efield=_to_jsonable(E_1photon),
+        efield_fluc=_to_jsonable(efield_fluc_1photon),
         bfield=_to_jsonable(B_1photon),
         doppler=_to_jsonable(doppler_1photon),
         rabi=_to_jsonable(infids_motion_rabi1),
         decay=_to_jsonable(decay_1photon),
         leakage=_to_jsonable(np.array(leakage1)),
-        scattering=_to_jsonable(np.array(scattering1)),
+        TO=_to_jsonable(TO_1),
+        scattering=None,  # not modelled
         total=_to_jsonable(sum_1photon),
     ),
 )

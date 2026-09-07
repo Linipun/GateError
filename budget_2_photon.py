@@ -41,10 +41,15 @@ Omega_Rabi = 8*2*np.pi
 atom_d = float(arg[1]) #um
 # Omega_Rabi = 5*2*np.pi #MHz*2pi
 
-inter_detuning = 10000*2*np.pi #MHz*2pi
+inter_detuning = 5000*2*np.pi #MHz*2pi
 intermediate_n = 7
 intermediate_l = 1
 intermediate_j = 1/2
+
+# Rydberg target state nS1/2 (used for config logging; lifetime uses these too)
+l = 0
+j = 1/2
+mj = -1/2
 
 Bz = 10 #G
 pulse_time= 7.65 #Omega_Rabi
@@ -78,8 +83,9 @@ pol_dc = None
 # intensity_DC_V = 0.442
 
 rin_strength = 1e-4
-f_hz_hz2 = 220
-f_range = 1e5 # Hz
+f_hz_hz2 = 220      # laser 1 (459 nm) white FM-noise PSD level [Hz^2/Hz]
+f_hz_hz2_2 = 220    # laser 2 (1038 nm) FM-noise PSD level [Hz^2/Hz]; set 0 to disable its contribution
+f_range = 1e5 # Hz, integration bandwidth (shared by both lasers)
 
 
 if atom_name == "Rb":
@@ -150,15 +156,18 @@ for Omega_Rabi in Omega_Rabis:
     d1 = atom.getDipoleMatrixElement(n1=n_g, l1=0, j1=1/2, mj1=-1/2, n2=intermediate_n, l2=intermediate_l, j2=intermediate_j,
                                      mj2=1/2,q=1, s=0.5)*bohr_r/hbar*e
 
+    # kappa-tilde_{r,j} = NON-RESONANT (background) polarizability only; the resonant self-light-shift
+    # is explicit in H_eff and enters the intensity operators via the -/+1/4Delta of K8/K9 (see
+    # build_Oseq_2photon). delta1 below then compensates only the background shift.
     ktilde0_1 = -(1/4/(Delta+w_qubit/1e6)-1/4/Delta)
-    ktilder_1 = -(alpha_r_1*2*np.pi*1e6)/4/d1**2+1/4/Delta
+    ktilder_1 = -(alpha_r_1*2*np.pi*1e6)/4/d1**2
 
     d2 = atom.getDipoleMatrixElement(n1=intermediate_n, l1=intermediate_l, j1=intermediate_j, mj1=1/2,
                                      n2=n, l2=0, j2=1/2, mj2=-1/2,q=-1, s=0.5)*bohr_r/hbar*e
     alpha_1_2 = alpha_g_gen.getPolarizability(c/(v_photon2), units='SI', accountForStateLifetime=False, mj=None)[0]
 
     ktilde0_2 = 0.0
-    ktilder_2 = -1/4/Delta+(alpha_1_2*2*np.pi*1e6)/4/d2**2
+    ktilder_2 = (alpha_1_2*2*np.pi*1e6)/4/d2**2
 
     delta1 = (ktilder_1*Omega1_0**2+ktilder_2*Omega2_0**2)
     delta2 = 0
@@ -188,7 +197,9 @@ for Omega_Rabi in Omega_Rabis:
     # plt.plot(time, phase)
 
 
-    doppler_shift = (1/lambda_rydberg-1/lambda_rydberg1)/1e-6*np.sqrt(kb*(T_atom*1e-6)/m_atom)
+    # Effective two-photon k = 2*pi*(1/lambda1 - 1/lambda2) for counter-propagating beams (the
+    # difference minimizes Doppler for the 459/1038 nm pair); rad/s to match delta_edc/delta_bdc.
+    doppler_shift = 2*np.pi*(1/lambda_rydberg-1/lambda_rydberg1)/1e-6*np.sqrt(kb*(T_atom*1e-6)/m_atom)
     # print('doppler shift:', doppler_shift/2/np.pi, 'Hz')
 
     calc = StarkMap(atom)
@@ -204,7 +215,8 @@ for Omega_Rabi in Omega_Rabis:
 
     total_shift = np.sqrt(delta_bdc**2+ delta_edc**2 + doppler_shift**2)
     # print('Total DC detuning fluctuation:', total_shift/2/np.pi, 'Hz')
-    detunings = total_shift/1e6/Omega_Rabi
+    # Absolute detuning in rad/us; Hamiltonians divides Delta1 by Omega_Rabi1 internally.
+    detunings = total_shift/1e6
     # print('delta/Ω:', detunings)
     # print('==============')
     infids_s = []
@@ -286,7 +298,7 @@ for Omega_Rabi in Omega_Rabis:
     # print(f'total error due to atom motion(blockade): {infids_motion_blockade} +/- {infids_motion_blockade_std}')
     # print(f'total error due to atom motion(rabi): {infids_motion_rabi} +/- {infids_motion_rabi_std}')
     infids_motion_blockade2.append(infids_motion_blockade)
-    infids_motion_rabi2.append(infids_motion_blockade)
+    infids_motion_rabi2.append(infids_motion_rabi)
     # infids_motion_blockade2.append(infids_motion_blockade)
 
     # delta_mj = atom.getZeemanEnergyShift(l=1, j=3/2, mj=3/2, magneticFieldBz=Bz/10000)/hbar/1e6 - \
@@ -312,8 +324,8 @@ for Omega_Rabi in Omega_Rabis:
     psi = np.zeros((3), complex)
     psi[0] = 1
     psi_no = np.copy(psi)
-    resolution = 10000
-    scatter_time, scatter_phase, scatter_dt = phase_cosine_generate(*phase_params, H_gen.pulse_time, resolution)
+    scatter_resolution = 10000  # fine grid for the scattering ODE only; must NOT clobber gate `resolution`
+    scatter_time, scatter_phase, scatter_dt = phase_cosine_generate(*phase_params, H_gen.pulse_time, scatter_resolution)
     for phi in scatter_phase:
         H0 = Ht(phi)
         H0_no = Ht(phi, decay_enabled=False)
@@ -341,9 +353,11 @@ for Omega_Rabi in Omega_Rabis:
     # vnoise_fs= np.array(vnoise_fs)
     # vnoise_W = np.array(vnoise_W)
     S_haar = isometry_haar_full()   # D=4
-    T = 2 * np.pi * 1.215 /Omega_Rabi
-    t_real = np.linspace(0.0, T, resolution)
-    dt_real = t_real[1] - t_real[0]
+    # Real-time step matching the gate `phase` array (resolution points over the pulse). The 2-photon
+    # response uses unnormalized Omega/blockade/Delta, so dt must be real time in us: dt_real =
+    # (normalized gate dt)/Omega_Rabi. Previously derived from a 10000-pt grid that, with a 200-pt
+    # phase array, integrated only ~2% of the pulse.
+    dt_real = dt / Omega_Rabi
     oOseq_nu1 = build_Oseq_2photon(phases=phase, dt=dt_real, B=blockade_mrad, Omega1=Omega1_0, Omega2=Omega2_0, delta1=delta1,
                                 delta2=delta2, Delta=Delta, inter_detuning=inter_detuning, n=n, Oinst_func=O2photon_nu1)
     # vnoise_contribution = []
@@ -354,7 +368,11 @@ for Omega_Rabi in Omega_Rabis:
     # vnoise_error= np.sum(vnoise_contribution)
     # print('error due to laser phase noise:', vnoise_error)
     If_2p_1 = response_2photon(oOseq_nu1, S_haar, 0, dt_real)
-    vnoise_error = If_2p_1*2*f_hz_hz2*f_range/1e6/1e6
+    # Both lasers' frequency noise couples to the same two-photon detuning operator in the effective
+    # reduction (O2photon_nu2 == O2photon_nu1), so they share this response and differ only in their
+    # noise PSD. Independent (uncorrelated) noise => variances add; a common-reference / phase-locked
+    # pair would instead combine coherently (amplitudes add). f_hz_hz2_2 = 0 disables laser 2.
+    vnoise_error = If_2p_1*(f_hz_hz2 + f_hz_hz2_2)*f_range/1e6/1e6
     v_2photon.append(vnoise_error)
 
     # intensity_noise_csv = pd.read_csv(RIN_csv_path, header=None)
@@ -413,11 +431,16 @@ E_2photon = np.array(E_2photon)
 B_2photon = np.array(B_2photon)
 doppler_2photon = np.array(doppler_2photon)
 decay_2photon = np.array(decay_2photon)
-leakage2 = np.array(leakage2)
+TO_2 = np.array(TO_2)
+scattering2 = np.array(scattering2)
+leakage2 = np.full(len(f_Rabis), np.nan)  # mj-leakage not modelled for the S-state 2-photon gate
 
-sum_2photon = (v_2photon+ RIN_2photon+infids_motion_blockade2+infids_motion_rabi2+decay_2photon+leakage2+
-               E_2photon+B_2photon+doppler_2photon)
-print('min infid:', min(sum_2photon))
+# TO_2 is the intrinsic finite-blockade error (the baseline subtracted from every other channel), so
+# it must be added back. scattering2 (loss off the 7P intermediate state) is a real computed channel.
+# leakage is not modelled here and is excluded.
+sum_2photon = (TO_2+v_2photon+ RIN_2photon+infids_motion_blockade2+infids_motion_rabi2+decay_2photon+
+               scattering2+E_2photon+B_2photon+doppler_2photon)
+print('min infid:', min(sum_2photon), '(leakage not included)')
 
 
 fig, ax = plt.subplots(figsize=(7,5))
@@ -427,9 +450,9 @@ ax.plot(f_Rabis, RIN_2photon, c="#ff4da6", linewidth=2, label="RIN")
 ax.plot(f_Rabis, infids_motion_blockade2, c="#2ecc71", linewidth=2, label="$\delta V$")
 ax.plot(f_Rabis, infids_motion_rabi2, linewidth=2, label='$\delta \Omega$')
 ax.plot(f_Rabis, decay_2photon, c="#7f8c8d", linewidth=2, label='$\gamma$')
+ax.plot(f_Rabis, TO_2, c="#b06ae2", linewidth=2, label='TO')
+ax.plot(f_Rabis, scattering2, c="#ff9f1a", linewidth=2, label='scattering')
 ax.plot(f_Rabis, sum_2photon, c="k", linewidth=4, label='$\Sigma$')
-# ax.plot(f_Rabis, scattering1, c='blue', linewidth=2)
-ax.plot(f_Rabis, leakage2, linewidth=2, label='leakage')
 ax.plot(f_Rabis, E_2photon, linewidth=2, label='E')
 ax.plot(f_Rabis, B_2photon, linewidth=2, label='B')
 ax.plot(f_Rabis, doppler_2photon, linewidth=2, label='doppler')
@@ -438,10 +461,10 @@ ax.set_ylabel("Infidelity", fontsize=14)
 ax.set_xlabel("$\Omega/ 2\pi$ [MHz] ", fontsize=14)
 ax.tick_params(labelsize=12)
 ax.set_yscale('log')
-ax.set_title('$1 \gamma$ gate', fontsize=16)
+ax.set_title('$2 \gamma$ gate', fontsize=16)
 ax.set_ylim([1e-9, 1e-3])
 ax.legend(fontsize=14)
-fig.savefig(os.path.join(result, 'Error_vs_rabi.pdf'), bbox_inches='tight')
+fig.savefig(os.path.join(result, 'Error_vs_rabi_2photon.pdf'), bbox_inches='tight')
 
 # -----------------------------
 # Save config + raw scan data
@@ -487,6 +510,7 @@ config = dict(
     bdc_fluc_G=float(bdc_fluc),
     num_samples=int(num_samples),
     phase_noise_csv=f_hz_hz2*f_range,#str(phase_noise_csv),
+    f_hz_hz2_laser2=f_hz_hz2_2,
     # RIN_csv_path=intensity_dbc,#str(RIN_csv_path),
     # RIN_background_csv_path=intensity_range,#str(RIN_background_csv_path),
     RIN_strength=rin_strength,
@@ -504,13 +528,15 @@ raw_fig2 = dict(
     y=dict(
         vnoise=_to_jsonable(v_2photon),
         RIN=_to_jsonable(RIN_2photon),
-        motional=_to_jsonable(infids_motion_blockade2),
+        blockade=_to_jsonable(infids_motion_blockade2),
+        rabi=_to_jsonable(infids_motion_rabi2),
         efield=_to_jsonable(E_2photon),
         bfield=_to_jsonable(B_2photon),
         doppler=_to_jsonable(doppler_2photon),
         decay=_to_jsonable(decay_2photon),
-        leakage=_to_jsonable(np.array(leakage2)),
-        scattering=_to_jsonable(np.array(scattering2)),
+        TO=_to_jsonable(TO_2),
+        scattering=_to_jsonable(scattering2),
+        leakage=None,  # mj-leakage not modelled for the S-state 2-photon gate
         total=_to_jsonable(sum_2photon),
     ),
 )

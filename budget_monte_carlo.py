@@ -255,6 +255,11 @@ class LeakageHamiltonians(Hamiltonians):
         H += decay_matrix
         return H
 
+class FourCosineHamiltonian(Hamiltonians):
+    def H01(self, phase_i, omega_scale: float = 1.0):
+        Omega1 = omega_scale * np.exp(1j * phase_i) / 2
+        Delta1 = self.Delta1 / self.Omega_Rabi1
+
 
 def fid_optimize(param, fid_gen):
     time, phase, dt = phase_cosine_generate(*param, fid_gen.pulse_time, fid_gen.resolution)
@@ -332,7 +337,8 @@ def sample_pair_distances(
 
 
 def sigma_r_um(atom_T_uK, U_trap_max_uK, w0_um):
-    return (0.5) * np.sqrt(atom_T_uK / U_trap_max_uK)
+    # Harmonic expansion of U0*exp(-2r^2/w0^2) with equipartition: sigma_r = (w0/2)*sqrt(T/U0)
+    return 0.5 * w0_um * np.sqrt(atom_T_uK / U_trap_max_uK)
 
 
 def sigma_z_um(atom_T_uK, U_trap_max_uK, w0_um, wavelength_um):

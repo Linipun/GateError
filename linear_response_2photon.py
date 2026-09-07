@@ -25,7 +25,7 @@ def O2photon_I1(phase, Omega1,Omega2, Delta, ktilde0_1, ktilder_1, ktilde0_2, kt
     O = np.zeros((dim, dim), dtype=complex)
 
     # First term: (Ω1Ω2)/(8Δ) Σ_i (|1_i><r_i| + h.c.)
-    Oeff_I = (Om1 * Om2) / (8.0 * Delta)
+    Oeff_I = -(Om1 * Om2) / (8.0 * Delta)
     phase = np.exp(-1j * phase)
 
     # same couplings as H_eff, scaled
@@ -42,7 +42,7 @@ def O2photon_I1(phase, Omega1,Omega2, Delta, ktilde0_1, ktilder_1, ktilde0_2, kt
         O[idx[state], idx[state]] += ktilde0_1 * ls1
 
     # + (κ̃r,1 - 1/(4Δ)) * Ω1^2 * Σ_i |r_i><r_i|   (Eq. K8) [oai_citation:10‡PRXQuantum.6.010331.pdf](sediment://file_00000000ff6871f898efa8a5b8425e17)
-    coeff_r = (ktilder_1 - 1.0/(4.0*Delta)) * ls1
+    coeff_r = (ktilder_1 + 1.0/(4.0*Delta)) * ls1
     for state in ["0r","r0","1r","r1"]:
         O[idx[state], idx[state]] += coeff_r
     O[idx["rr"], idx["rr"]] += 2.0 * coeff_r
@@ -59,7 +59,7 @@ def O2photon_I2(phase, Omega1,Omega2, Delta, ktilde0_1, ktilder_1, ktilde0_2, kt
     O = np.zeros((dim, dim), dtype=complex)
 
     # First term: (Ω1Ω2)/(8Δ) Σ_i (|1_i><r_i| + h.c.)
-    Oeff_I = (Om1 * Om2) / (8.0 * Delta)
+    Oeff_I = -(Om1 * Om2) / (8.0 * Delta)
     phase = np.exp(-1j * phase)
 
     for (a,b) in [("01","0r"), ("11","1r"), ("r1","rr"), ("10","r0"), ("11","r1"), ("1r","rr")]:
@@ -74,7 +74,7 @@ def O2photon_I2(phase, Omega1,Omega2, Delta, ktilde0_1, ktilder_1, ktilde0_2, kt
         O[idx[state], idx[state]] += ktilde0_2 * ls2
 
     # + (κ̃r,2 + 1/(4Δ)) * Ω2^2 * Σ_i |r_i><r_i|  (Eq. K9) [oai_citation:12‡PRXQuantum.6.010331.pdf](sediment://file_00000000ff6871f898efa8a5b8425e17)
-    coeff_r = (ktilder_2 + 1.0/(4.0*Delta)) * ls2
+    coeff_r = (ktilder_2 - 1.0/(4.0*Delta)) * ls2
     for state in ["0r","r0","1r","r1"]:
         O[idx[state], idx[state]] += coeff_r
     O[idx["rr"], idx["rr"]] += 2.0 * coeff_r
@@ -162,13 +162,13 @@ def H_eff_2photon(phase: float, B: float, Omega1: float, Omega2: float,
     de2 = delta2
 
     # Effective two-photon coupling strength in Eq. (K7): Ω1Ω2/(4Δ)
-    Oeff = (Om1 * Om2) / (4.0 * Delta)
+    Oeff = -(Om1 * Om2) / (4.0 * Delta)
 
     # Optional phase on effective coupling
     phase = np.exp(-1j * phase)
 
     # Self-light-shift term in Eq. (K7): (Ω1^2 - Ω2^2)/(4Δ)
-    self_ls = (Om1*Om1 - Om2*Om2) / (4.0 * Delta)
+    self_ls = -(Om1*Om1 - Om2*Om2) / (4.0 * Delta)
 
     # Build Hamiltonian
     H = np.zeros((dim, dim), dtype=complex)
@@ -249,10 +249,10 @@ def build_Oseq_2photon(phases, dt, B, Omega1, Omega2, delta1, delta2, Delta, int
     atom = Cesium()
     v_photon1 = atom.getTransitionFrequency(n1=6, l1=0, j1=1 / 2, n2=7, l2=1, j2=1 / 2, s=0.5)
     v_photon1 += inter_detuning * 1e6 / 2 / np.pi
-    v_photon2 = atom.getTransitionFrequency(n1=6, l1=1, j1=1 / 2, n2=n, l2=0, j2=1 / 2, s=0.5)
+    v_photon2 = atom.getTransitionFrequency(n1=7, l1=1, j1=1 / 2, n2=n, l2=0, j2=1 / 2, s=0.5)
     v_photon2 -= inter_detuning * 1e6 / 2 / np.pi
 
-    alpha_g_gen = DynamicPolarizability(atom, n=6, l=1, j=1 / 2, s=0.5)
+    alpha_g_gen = DynamicPolarizability(atom, n=6, l=0, j=1 / 2, s=0.5)  # |1> = 6S1/2 (was l=1, 6P)
     alpha_g_gen.defineBasis(6, 9)
     alpha_r_gen = DynamicPolarizability(atom, n=n, l=0, j=1 / 2, s=0.5)
     alpha_r_gen.defineBasis(6, n + 20)
@@ -261,15 +261,21 @@ def build_Oseq_2photon(phases, dt, B, Omega1, Omega2, delta1, delta2, Delta, int
     d1 = atom.getDipoleMatrixElement(n1=6, l1=0, j1=1 / 2, mj1=-1 / 2, n2=7, l2=1, j2=1 / 2, mj2=1 / 2, q=1,
                                      s=0.5) * bohr_r / hbar * e
 
+    # kappa-tilde_{r,j} = NON-RESONANT (background) polarizability of |r> vs |1> only. The resonant
+    # intermediate-state (|e>) shift of |1>,|r> is already explicit in H_eff (effective Rabi + the
+    # self-light-shift (Om11^2-Om12^2)/4Delta) and reaches the intensity operators via the -/+1/4Delta
+    # of K8/K9. Folding +/-1/4Delta into kappa-tilde_r double-books it and cancels the self-light-shift
+    # out of the noise operator. (kappa-tilde_{0,j} DOES keep its resonant piece: |0> is a spectator,
+    # never eliminated, so its |e> coupling lives nowhere else.)
     ktilde0_1 = -(1 / 4 / (Delta + w_qubit / 1e6) - 1 / 4 / Delta)
-    ktilder_1 = -(alpha_r_1 * 2 * np.pi * 1e6) / 4 / d1 ** 2 + 1 / 4 / Delta
+    ktilder_1 = -(alpha_r_1 * 2 * np.pi * 1e6) / 4 / d1 ** 2
 
     d2 = atom.getDipoleMatrixElement(n1=7, l1=1, j1=1 / 2, mj1=1 / 2, n2=n, l2=0, j2=1 / 2, mj2=-1 / 2, q=-1,
                                      s=0.5) * bohr_r / hbar * e
     alpha_1_2 = alpha_g_gen.getPolarizability(c / (v_photon2), units='SI', accountForStateLifetime=False, mj=None)[0]
 
     ktilde0_2 = 0.0
-    ktilder_2 = -1 / 4 / Delta + (alpha_1_2 * 2 * np.pi * 1e6) / 4 / d2 ** 2
+    ktilder_2 = (alpha_1_2 * 2 * np.pi * 1e6) / 4 / d2 ** 2
 
     Us = propagate_U_2photon(phases, dt, B, Omega1, Omega2, delta1, delta2, Delta, inter_detuning, n,ktilde0_1,
                              ktilder_1, ktilde0_2, ktilder_2)
