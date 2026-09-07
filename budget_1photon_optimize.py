@@ -235,6 +235,20 @@ def _save_alpha_cache(cache):
         pass
 
 
+def stark_fit_field(n, fraction=0.3):
+    """Largest field [V/cm] where a quadratic Stark fit is still meaningful.
+
+    Above the Inglis-Teller limit E_IT ~ 1/(3 n^5) a.u. the Stark manifolds of adjacent n
+    overlap and the shift stops being quadratic, so fitting a polarizability over 0-60 V/cm
+    (as budget_1photon_scan.py does) is only defensible for n <~ 55.  At n=80 it comes out
+    3x low, and at n>=95 ARC returns a negative or ~0 value.  Fitting inside the limit
+    instead reproduces the expected n^7 scaling: alpha = 4.4e3, 1.4e4, 3.7e4, 8.8e4, 1.8e5
+    MHz/(V/cm)^2 at n = 60, 70, 80, 90, 99.
+    """
+    E_IT_V_per_cm = 5.142e11 / (3.0 * float(n) ** 5) / 100.0
+    return fraction * E_IT_V_per_cm
+
+
 @lru_cache(maxsize=4096)
 def atom_quantities(atom_name, n, l, j, Bz, alpha_dc_input):
     """Rydberg lifetime [us], atom mass [kg] and DC polarizability [MHz/(V/cm)^2].
@@ -251,7 +265,7 @@ def atom_quantities(atom_name, n, l, j, Bz, alpha_dc_input):
     if alpha_dc_input is not None:
         return R_lifetime, m_atom, float(alpha_dc_input)
 
-    key = f"{atom_name}|n={int(n)}|Bz={float(Bz):.6g}"
+    key = f"{atom_name}|n={int(n)}|Bz={float(Bz):.6g}|IT"
     cache = _load_alpha_cache()
     if key in cache:
         return R_lifetime, m_atom, float(cache[key])
@@ -259,7 +273,7 @@ def atom_quantities(atom_name, n, l, j, Bz, alpha_dc_input):
     calc = StarkMap(atom)
     calc.defineBasis(n=int(n), l=1, j=1.5, mj=1.5, nMin=int(n) - 20, nMax=int(n) + 30, maxL=5,
                      Bz=float(Bz) / 10000)
-    calc.diagonalise(np.linspace(0, 60, 600))
+    calc.diagonalise(np.linspace(0, stark_fit_field(n), 400))
     alpha_dc = float(calc.getPolarizability(debugOutput=False))
 
     cache[key] = alpha_dc
