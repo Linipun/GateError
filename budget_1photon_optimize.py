@@ -828,6 +828,7 @@ def run_optimization(
     x0 = np.clip(x0, [b[0] for b in bounds], [b[1] for b in bounds])
 
     history = []
+    incumbent = dict(x=None, f=np.inf)
 
     def make_objective(fixed_n=None):
         def objective(xin):
@@ -845,6 +846,9 @@ def run_optimization(
                 batched=batched,
             )
             history.append(dict(x=_to_jsonable(np.asarray(x)), total=float(val)))
+            if val < incumbent["f"]:
+                incumbent["f"] = float(val)
+                incumbent["x"] = x.copy()
             return float(val)
         return objective
 
@@ -877,6 +881,17 @@ def run_optimization(
         if best_x is None:
             raise ValueError("n_grid contains no value inside the n bounds.")
         result = opt.OptimizeResult(x=best_x, fun=best_fun, success=success, message=message)
+
+    # Powell's line search can end on a point worse than one it already visited: the
+    # objective is stepped in n (rounding) and the blockade curve is structured, so it is
+    # not unimodal.  Keep the best point actually evaluated.
+    if incumbent["x"] is not None and incumbent["f"] < best_fun:
+        if verbose:
+            print(f"\nPowell returned {best_fun:.6e}; keeping the better point it visited "
+                  f"({incumbent['f']:.6e}).")
+        best_x = np.asarray(incumbent["x"], dtype=float)
+        best_fun = float(incumbent["f"])
+        message = f"{message} (returned the best evaluated point, not the final iterate)"
 
     best_params = vector_to_params(best_x)
     # Re-evaluate the optimum with the full channel breakdown.
