@@ -109,10 +109,10 @@ DEFAULT_CONFIG = dict(
 )
 
 PARAMETER_NAMES = ["n", "atom_d_um", "Omega_eff_MHz", "Delta_GHz", "w459_um", "w1038_um",
-                   "trap_depth_uK"]
+                   "trap_depth_uK", "log10_Omega1_over_Omega2"]
 
-#                      n     d[um] Om_eff  Delta[GHz] w459  w1038   U[uK]
-DEFAULT_X0 = np.array([70.0, 5.0, 8.0, 5.0, 10.0, 10.0, 1000.0], dtype=float)
+#                      n     d[um] Om_eff  Delta[GHz] w459  w1038   U[uK]  log10(Om1/Om2)
+DEFAULT_X0 = np.array([70.0, 5.0, 8.0, 5.0, 10.0, 10.0, 1000.0, 0.0], dtype=float)
 
 DEFAULT_BOUNDS = [
     (40.0, 99.0),      # n           (S-state blockade table)
@@ -122,6 +122,7 @@ DEFAULT_BOUNDS = [
     (2.0, 40.0),       # w459 [um]
     (2.0, 40.0),       # w1038 [um]
     (20.0, 5000.0),    # trap depth [uK]
+    (-1.0, 2.0),       # log10(Omega1/Omega2); 0 = balanced, clipped into the power box
 ]
 
 TOTAL_CHANNELS = ["TO", "blockade", "rabi", "scattering", "efield", "bfield", "doppler",
@@ -179,21 +180,31 @@ def max_rabi_rad_per_us(P_max_W, d_ea0, w0_um):
     return d * E / 1e6
 
 
-def choose_split(omega_product, om1_max, om2_max):
-    """Split Omega1*Omega2 = omega_product between the arms under the power box.
+def split_from_ratio(omega_product, log10_ratio, om1_max, om2_max):
+    """Split Omega1*Omega2 = omega_product at the requested ratio, inside the power box.
 
-    Scattering off the intermediate state grows with Omega1^2 + Omega2^2 at fixed product, so
-    the balanced split is optimal when it fits; otherwise clip the binding arm.  Returns
-    (Omega1, Omega2) in rad/us, or None when the power box cannot reach the product at all.
+    The ratio is a genuine degree of freedom, not something to fix analytically.  Scattering
+    grows with Omega1^2 + Omega2^2 and so prefers a balanced split, but the RIN response does
+    not: arm 2's intensity-noise coefficient (ktilde_r2 - 1/4Delta) saturates near the ground
+    state's 1038 nm polarizability while arm 1's (ktilde_r1 + 1/4Delta) falls as 1/Delta, so the
+    2-photon RIN is dominated by arm 2 and is reduced by moving power INTO the blue arm.  At
+    n=70, Delta/2pi = 5 GHz the summed RIN response falls from 149 (balanced) to 71 at
+    Omega1/Omega2 = 4.  That is exactly what the 459 nm power ceiling then limits.
+
+    r = Omega1/Omega2 is feasible when  prod/om2_max^2 <= r <= om1_max^2/prod;  outside that the
+    ratio is CLIPPED (not rejected) so the objective stays continuous for the optimizer.
+
+    Returns (Omega1, Omega2, clipped) in rad/us, or None when the box cannot reach the product.
     """
     if om1_max * om2_max < omega_product:
         return None
-    balanced = np.sqrt(omega_product)
-    if balanced <= om1_max and balanced <= om2_max:
-        return balanced, balanced
-    if balanced > om1_max:
-        return om1_max, omega_product / om1_max
-    return omega_product / om2_max, om2_max
+    r = 10.0 ** float(log10_ratio)
+    r_lo = omega_product / om2_max ** 2
+    r_hi = om1_max ** 2 / omega_product
+    r_clipped = min(max(r, r_lo), r_hi)
+    Omega1 = np.sqrt(omega_product * r_clipped)
+    Omega2 = np.sqrt(omega_product / r_clipped)
+    return Omega1, Omega2, bool(abs(r_clipped - r) > 1e-12 * max(r, 1.0))
 
 
 # -----------------------------
@@ -340,11 +351,14 @@ def vector_to_params(x):
         w459=float(x[4]),
         w1038=float(x[5]),
         trap_depth=float(x[6]),
+        log10_ratio=float(x[7]) if len(x) > 7 else 0.0,
     )
 
 
-def params_to_vector(n, atom_d, omega_eff_mhz, delta_ghz, w459, w1038, trap_depth):
-    return np.array([n, atom_d, omega_eff_mhz, delta_ghz, w459, w1038, trap_depth], dtype=float)
+def params_to_vector(n, atom_d, omega_eff_mhz, delta_ghz, w459, w1038, trap_depth,
+                     log10_ratio=0.0):
+    return np.array([n, atom_d, omega_eff_mhz, delta_ghz, w459, w1038, trap_depth, log10_ratio],
+                    dtype=float)
 
 
 def evaluate_single_point(x, config=None, num_samples=500, seed=1234, optimize_phase=True,
@@ -379,13 +393,13 @@ def evaluate_single_point(x, config=None, num_samples=500, seed=1234, optimize_p
     omega_product = 2.0 * Omega_Rabi * inter_detuning        # Omega1*Omega2, (rad/us)^2
     om1_max = max_rabi_rad_per_us(cfg["p1_max_W"], d1_ea0, w459)
     om2_max = max_rabi_rad_per_us(cfg["p2_max_W"], d2_ea0, w1038)
-    split = choose_split(omega_product, om1_max, om2_max)
+    split = split_from_ratio(omega_product, p["log10_ratio"], om1_max, om2_max)
     if split is None:
         need = np.sqrt(omega_product) / 2 / np.pi
         return _reject(f"laser power insufficient: need Omega1*Omega2 = "
                        f"({need:.0f} MHz)^2, box allows "
                        f"({np.sqrt(om1_max*om2_max)/2/np.pi:.0f} MHz)^2")
-    Omega1, Omega2 = split
+    Omega1, Omega2, ratio_clipped = split
     P1 = beam_power_W(Omega1, d1_ea0, w459)
     P2 = beam_power_W(Omega2, d2_ea0, w1038)
 
@@ -503,7 +517,7 @@ def evaluate_single_point(x, config=None, num_samples=500, seed=1234, optimize_p
         Omega1_MHz=float(Omega1 / 2 / np.pi), Omega2_MHz=float(Omega2 / 2 / np.pi),
         P459_mW=float(P1 * 1e3), P1038_W=float(P2),
         P459_frac=float(P1 / cfg["p1_max_W"]), P1038_frac=float(P2 / cfg["p2_max_W"]),
-        split_balanced=bool(abs(Omega1 - Omega2) < 1e-9 * max(Omega1, Omega2)),
+        log10_ratio=float(np.log10(Omega1 / Omega2)), ratio_clipped_by_power=bool(ratio_clipped),
         blockade_MHz=float(blockade_mrad / 2 / np.pi), R_lifetime_us=float(R_lifetime),
         tau_intermediate_us=float(tau_e), pol_dc_MHz_per_Vcm2=float(pol_dc),
         d1_ea0=float(d1_ea0), d2_ea0=float(d2_ea0),
@@ -683,7 +697,9 @@ def run_optimization(x0=DEFAULT_X0, bounds=DEFAULT_BOUNDS, config=None, opt_samp
     for name, val in zip(PARAMETER_NAMES, best_x):
         print(f"  {name}: {int(round(val)) if name == 'n' else round(val, 4)}")
     print(f"  -> Omega1/2pi = {best_details['Omega1_MHz']:.1f} MHz, "
-          f"Omega2/2pi = {best_details['Omega2_MHz']:.1f} MHz")
+          f"Omega2/2pi = {best_details['Omega2_MHz']:.1f} MHz "
+          f"(ratio {10**best_details['log10_ratio']:.2f}"
+          f"{', clipped by the power box' if best_details['ratio_clipped_by_power'] else ''})")
     print(f"  -> P(459) = {best_details['P459_mW']:.1f} mW "
           f"({100*best_details['P459_frac']:.0f}% of budget), "
           f"P(1038) = {best_details['P1038_W']:.2f} W "
@@ -736,6 +752,9 @@ def parse_args():
     p.add_argument("--w459-bounds", type=float, nargs=2, default=DEFAULT_BOUNDS[4])
     p.add_argument("--w1038-bounds", type=float, nargs=2, default=DEFAULT_BOUNDS[5])
     p.add_argument("--trap-depth-bounds", type=float, nargs=2, default=DEFAULT_BOUNDS[6])
+    p.add_argument("--log10-ratio", type=float, default=DEFAULT_X0[7],
+                   help="log10(Omega1/Omega2); 0 = balanced arms.")
+    p.add_argument("--ratio-bounds", type=float, nargs=2, default=DEFAULT_BOUNDS[7])
 
     # The power bound.
     p.add_argument("--p459-mW", type=float, default=DEFAULT_CONFIG["p1_max_W"] * 1e3,
@@ -785,10 +804,10 @@ def main():
         return
 
     x0 = params_to_vector(args.n, args.atom_d, args.omega_eff_mhz, args.delta_ghz, args.w459,
-                          args.w1038, args.trap_depth)
+                          args.w1038, args.trap_depth, args.log10_ratio)
     bounds = [tuple(args.n_bounds), tuple(args.atom_d_bounds), tuple(args.omega_eff_bounds),
               tuple(args.delta_bounds), tuple(args.w459_bounds), tuple(args.w1038_bounds),
-              tuple(args.trap_depth_bounds)]
+              tuple(args.trap_depth_bounds), tuple(args.ratio_bounds)]
     f_rabis = np.linspace(args.scan_min_mhz, args.scan_max_mhz, args.scan_points)
     optimize_phase = not args.no_phase_opt
 
