@@ -830,6 +830,7 @@ def run_optimization(
     optimize_phase=True,
     batched=True,
     n_grid=None,
+    restarts=3,
     verbose=True,
 ):
     os.makedirs(result_dir, exist_ok=True)
@@ -869,12 +870,27 @@ def run_optimization(
         return objective
 
     if n_grid is None:
-        result = opt.minimize(
-            make_objective(), x0, method="Powell", bounds=bounds,
-            options=dict(maxiter=int(maxiter), disp=verbose, xtol=1e-3, ftol=1e-6),
-        )
-        best_x = np.asarray(result.x, dtype=float)
-        best_fun = float(result.fun)
+        # Powell is start-point sensitive on this objective: it regularly reports "terminated
+        # successfully" after one cycle of line searches that each found nothing, while a
+        # restart from the same point keeps improving.  Restart from the incumbent until a pass
+        # buys less than 1%.
+        result = None
+        best_x, best_fun = np.asarray(x0, dtype=float), np.inf
+        obj = make_objective()
+        for k in range(max(1, int(restarts))):
+            result = opt.minimize(
+                obj, best_x, method="Powell", bounds=bounds,
+                options=dict(maxiter=int(maxiter), disp=verbose, xtol=1e-3, ftol=1e-6),
+            )
+            new_f = float(min(incumbent["f"], result.fun))
+            new_x = np.asarray(incumbent["x"] if incumbent["f"] < result.fun else result.x,
+                               dtype=float)
+            gain = (best_fun - new_f) / abs(best_fun) if np.isfinite(best_fun) else 1.0
+            best_x, best_fun = new_x, new_f
+            if verbose:
+                print(f"  [restart {k + 1}/{restarts}] best = {best_fun:.6e}")
+            if k > 0 and gain < 0.01:
+                break
         success, message = bool(result.success), str(result.message)
     else:
         # Mixed-integer version: n is discrete, so optimise the continuous parameters
@@ -983,6 +999,9 @@ def parse_args():
     parser.add_argument("--opt-samples", type=int, default=500, help="MC samples during optimization.")
     parser.add_argument("--num-samples", type=int, default=10000, help="MC samples for the final scan.")
     parser.add_argument("--maxiter", type=int, default=50)
+    parser.add_argument("--restarts", type=int, default=3,
+                        help="Restart Powell from its own best point up to this many times; "
+                             "stops early when a pass gains less than 1%%.")
     parser.add_argument("--n-grid", type=int, nargs="+", default=None,
                         help="Optimize the continuous parameters once per listed n and keep the best.")
     parser.add_argument("--no-phase-opt", action="store_true",
@@ -1062,7 +1081,7 @@ def main():
         _, best_x, _ = run_optimization(
             x0=x0, bounds=bounds, config=cfg, opt_samples=args.opt_samples, seed=args.seed,
             maxiter=args.maxiter, result_dir=args.result_dir, optimize_phase=optimize_phase,
-            batched=batched, n_grid=args.n_grid,
+            batched=batched, n_grid=args.n_grid, restarts=args.restarts,
         )
         if args.mode == "optimize_and_scan":
             # Final scan at the optimized non-Omega parameters; Omega itself is scanned.

@@ -651,7 +651,7 @@ def run_scan(x, config=None, num_samples=10000, seed=1234, result_dir="result", 
 # -----------------------------
 def run_optimization(x0=DEFAULT_X0, bounds=DEFAULT_BOUNDS, config=None, opt_samples=300,
                      seed=1234, maxiter=15, result_dir="result", optimize_phase=True,
-                     batched=True, verbose=True):
+                     batched=True, verbose=True, restarts=3):
     os.makedirs(result_dir, exist_ok=True)
     cfg = dict(DEFAULT_CONFIG)
     if config:
@@ -678,9 +678,26 @@ def run_optimization(x0=DEFAULT_X0, bounds=DEFAULT_BOUNDS, config=None, opt_samp
             incumbent["f"], incumbent["x"] = float(val), x.copy()
         return float(val)
 
-    result = opt.minimize(objective, x0, method="Powell", bounds=bounds,
-                          options=dict(maxiter=int(maxiter), disp=verbose, xtol=1e-3, ftol=1e-6))
-    best_x, best_fun = np.asarray(result.x, dtype=float), float(result.fun)
+    # Powell is start-point sensitive on this objective and regularly reports "terminated
+    # successfully" after one cycle of line searches that each found nothing, while a restart
+    # from the same point goes on to improve by a factor of 2.  Restart from the incumbent until
+    # a pass buys less than 1%.
+    result = None
+    best_x, best_fun = np.asarray(x0, dtype=float), np.inf
+    for k in range(max(1, int(restarts))):
+        result = opt.minimize(objective, best_x, method="Powell", bounds=bounds,
+                              options=dict(maxiter=int(maxiter), disp=verbose, xtol=1e-3,
+                                           ftol=1e-6))
+        new_x = np.asarray(incumbent["x"] if incumbent["f"] < result.fun else result.x,
+                           dtype=float)
+        new_f = float(min(incumbent["f"], result.fun))
+        gain = (best_fun - new_f) / abs(best_fun) if np.isfinite(best_fun) else 1.0
+        best_x, best_fun = new_x, new_f
+        if verbose:
+            print(f"  [restart {k + 1}/{restarts}] best = {best_fun:.6e}"
+                  f"{'' if k == 0 else f' (gain {100 * gain:.1f}%)'}")
+        if k > 0 and gain < 0.01:
+            break
     message = str(result.message)
     # Same guard as the 1-photon driver: Powell can finish on a worse point than it visited.
     if incumbent["x"] is not None and incumbent["f"] < best_fun:
@@ -774,6 +791,9 @@ def parse_args():
     p.add_argument("--opt-samples", type=int, default=300)
     p.add_argument("--num-samples", type=int, default=10000)
     p.add_argument("--maxiter", type=int, default=15)
+    p.add_argument("--restarts", type=int, default=3,
+                   help="Restart Powell from its own best point up to this many times; stops "
+                        "early when a pass gains less than 1%%.")
     p.add_argument("--no-phase-opt", action="store_true")
     p.add_argument("--scan-points", type=int, default=25)
     p.add_argument("--scan-min-mhz", type=float, default=1.0)
@@ -824,7 +844,7 @@ def main():
         _, best_x, _ = run_optimization(x0=x0, bounds=bounds, config=cfg,
                                         opt_samples=args.opt_samples, seed=args.seed,
                                         maxiter=args.maxiter, result_dir=args.result_dir,
-                                        optimize_phase=optimize_phase)
+                                        optimize_phase=optimize_phase, restarts=args.restarts)
         if args.mode == "optimize_and_scan":
             run_scan(best_x, config=cfg, num_samples=args.num_samples, seed=args.seed,
                      result_dir=args.result_dir, f_rabis=f_rabis, optimize_phase=optimize_phase,
