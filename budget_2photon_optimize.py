@@ -396,9 +396,18 @@ def evaluate_single_point(x, config=None, num_samples=500, seed=1234, optimize_p
     split = split_from_ratio(omega_product, p["log10_ratio"], om1_max, om2_max)
     if split is None:
         need = np.sqrt(omega_product) / 2 / np.pi
-        return _reject(f"laser power insufficient: need Omega1*Omega2 = "
-                       f"({need:.0f} MHz)^2, box allows "
-                       f"({np.sqrt(om1_max*om2_max)/2/np.pi:.0f} MHz)^2")
+        # Scale the penalty with how badly the power box is exceeded.  A flat penalty is a wall
+        # with no gradient: Powell's line search stalls against it instead of walking back into
+        # the feasible region, which under-converges every run whose optimum sits on the power
+        # boundary (i.e. the interesting ones).
+        deficit = omega_product / (om1_max * om2_max)
+        if verbose:
+            print(f"  infeasible (n={n}, Om_eff={p['Omega_eff_MHz']:.3g} MHz, "
+                  f"Delta={p['Delta_GHz']:.3g} GHz, w={w459:.3g}/{w1038:.3g} um): "
+                  f"need ({need:.0f} MHz)^2, box allows "
+                  f"({np.sqrt(om1_max*om2_max)/2/np.pi:.0f} MHz)^2")
+        val = _BIG * deficit
+        return (val, dict(total=val, invalid="laser power insufficient")) if return_details else val
     Omega1, Omega2, ratio_clipped = split
     P1 = beam_power_W(Omega1, d1_ea0, w459)
     P2 = beam_power_W(Omega2, d2_ea0, w1038)
