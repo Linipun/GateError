@@ -504,14 +504,69 @@ def self_test(verbose=True):
     T = P @ (np.kron(HA, np.eye(3)) + np.kron(np.eye(3), HB)) @ P.T
     err_tensor = np.max(np.abs(L.H11(0.6) - T))
 
+    # --- structural invariants: exchange symmetry and the tensor-sum identity ---
+    # Swapping atom 1 <-> 2, with the basis permuted and the two Rabi scalings swapped, must map
+    # H11 onto itself.  This is the check that catches a wrong atom index.
+    def exchange_err(H, P, a=0.9, b=1.1):
+        return max(np.max(np.abs(H.H11(p, omega1_scale=a, omega2_scale=b)[np.ix_(P, P)]
+                                 - H.H11(p, omega1_scale=b, omega2_scale=a)))
+                   for p in (0.0, 0.6, -1.4))
+
+    sym_kw = dict(Omega_Rabi1=Omega, blockade_inf=False, blockade=blockades[0],
+                  r_lifetime=R1, r_lifetime2=R1, Delta1=0, Stark1=0, Stark2=0,
+                  resolution=resolution, pulse_time=pulse_time)
+    err_x4 = exchange_err(Hamiltonians(**sym_kw), [0, 2, 1, 3])
+    err_x9 = exchange_err(LeakageHamiltonians(mj12_split=mj, **sym_kw),
+                          [0, 2, 1, 3, 5, 4, 7, 6, 8])
+    F = FourCosineHamiltonian(Omega_Rabi1=Omega, Omega_Rabi2=Omega / np.sqrt(3), blockade_inf=0,
+                              blockade_11=blockades[0], blockade_12=0.3 * blockades[0],
+                              blockade_21=0.3 * blockades[0], blockade_22=0.7 * blockades[0],
+                              r_lifetime=R1, r_lifetime2=R1, Delta1=0, Delta2=mj,
+                              pulse_time=pulse_time, resolution=resolution)
+    err_xF = exchange_err(F, [0, 2, 1, 4, 3, 5, 7, 6, 8])
+
+    # FourCosineHamiltonian's 9 states are (atom1, atom2) over |1>, r1, r2, so the same
+    # tensor-sum identity applies, using its three-level single-atom Hamiltonian.
+    MAPF = {(0, 0): 0, (1, 0): 1, (0, 1): 2, (2, 0): 3, (0, 2): 4,
+            (1, 1): 5, (2, 1): 6, (1, 2): 7, (2, 2): 8}
+    PF = np.zeros((9, 9))
+    for (a, b), i in MAPF.items():
+        PF[i, 3 * a + b] = 1.0
+
+    def four_tensor_err(Delta1):
+        G = FourCosineHamiltonian(Omega_Rabi1=Omega, Omega_Rabi2=Omega / np.sqrt(3),
+                                  blockade_inf=0, blockade_11=0.0, blockade_12=0.0,
+                                  blockade_21=0.0, blockade_22=0.0, r_lifetime=R1,
+                                  r_lifetime2=R2, Delta1=Delta1, Delta2=mj,
+                                  pulse_time=pulse_time, resolution=resolution)
+        TA = G.H01_3level(0.6, decay_rate=G.decay_rate)
+        TB = G.H01_3level(0.6, decay_rate=G.decay_rate2)
+        return np.max(np.abs(G.H11(0.6)
+                             - PF @ (np.kron(TA, np.eye(3)) + np.kron(np.eye(3), TB)) @ PF.T))
+
+    err_tensorF = four_tensor_err(0.0)
+    # Known deviation inherited from the notebook: its H11 writes the single-r2 diagonals as
+    # Delta2 - Delta1 where the tensor sum wants Delta2, so the identity holds only at
+    # Delta1 = 0 -- the only value the notebook ever uses.  Reported, not asserted, because
+    # changing it would break parity with the notebook this class is a port of.
+    err_tensorF_det = four_tensor_err(0.3)
+
     if verbose:
         print(f"self-test: max |batched - asym_return_fidel| = {err_asym:.3e}")
         print(f"self-test: max |batched - return_fidel|      = {err_sym:.3e}")
         print(f"self-test: max |batched_9 - Leakage asym|    = {err9:.3e}")
         print(f"self-test: |H11(B=0) - tensor sum| (Delta1=0.3) = {err_tensor:.3e}")
+        print(f"self-test: exchange symmetry 4-level / Leakage / FourCosine = "
+              f"{err_x4:.3e} / {err_x9:.3e} / {err_xF:.3e}")
+        print(f"self-test: FourCosine tensor sum at Delta1=0 = {err_tensorF:.3e}")
+        print(f"           at Delta1=0.3 it is {err_tensorF_det:.3e}: expected, the notebook's "
+              f"H11 uses\n           Delta2-Delta1 on the single-r2 diagonals and only ever "
+              f"runs at Delta1=0")
     assert err_asym < 1e-11 and err_sym < 1e-11, "batched propagator disagrees with reference"
     assert err9 < 1e-11, "batched 9-level propagator disagrees with LeakageHamiltonians"
     assert err_tensor < 1e-10, "H11 is not the tensor sum of the single-atom Hamiltonians"
+    assert max(err_x4, err_x9, err_xF) < 1e-12, "H11 is not symmetric under atom exchange"
+    assert err_tensorF < 1e-10, "FourCosine H11 is not the tensor sum at Delta1 = 0"
     return max(err_asym, err_sym, err9)
 
 
