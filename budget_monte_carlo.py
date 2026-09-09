@@ -132,16 +132,21 @@ class Hamiltonians:
             H += (-1j * decay_matrix / 2)
         return H
 
-    def H01(self, phase_i, omega_scale: float = 1.0):
-        """Single-atom Hamiltonian at a given phase (Hermitian)."""
+    def H01(self, phase_i, omega_scale: float = 1.0, decay_rate=None):
+        """Single-atom Hamiltonian at a given phase (Hermitian apart from -i*gamma/2).
+
+        decay_rate defaults to atom 1's; pass self.decay_rate2 for the atom-2 term, otherwise
+        an asymmetric pair (r_lifetime != r_lifetime2) silently gets atom 1's lifetime twice.
+        """
         Omega1 = omega_scale * np.exp(1j * phase_i) / 2
         Delta1 = self.Delta1 / self.Omega_Rabi1
+        g = self.decay_rate if decay_rate is None else decay_rate
 
         H = np.array([
             [0, Omega1],
             [np.conj(Omega1), Delta1],
         ], complex)
-        decay_matrix = np.diag([0, -1j * self.decay_rate / 2])
+        decay_matrix = np.diag([0, -1j * g / 2])
         H += decay_matrix
         return H
 
@@ -157,7 +162,8 @@ class Hamiltonians:
         psi11 = self.initial_psi11.copy()
         for phi in phases:
             U01 = scipy.linalg.expm(-1j * self.H01(phi, omega_scale=omega1_scale) * dt)
-            U10 = scipy.linalg.expm(-1j * self.H01(phi, omega_scale=omega2_scale) * dt)
+            U10 = scipy.linalg.expm(-1j * self.H01(phi, omega_scale=omega2_scale,
+                                                   decay_rate=self.decay_rate2) * dt)
             U11 = scipy.linalg.expm(-1j * self.H11(phi, omega1_scale=omega1_scale, omega2_scale= omega2_scale) * dt)
             psi01 = U01 @ psi01
             psi10 = U10 @ psi10
@@ -240,18 +246,23 @@ class LeakageHamiltonians(Hamiltonians):
             H += (-1j * decay_matrix / 2)
         return H
 
-    def H01(self, phase_i, omega_scale: float = 1.0):
-        """Single-atom Hamiltonian at a given phase (Hermitian)."""
+    def H01(self, phase_i, omega_scale: float = 1.0, decay_rate=None):
+        """Single-atom Hamiltonian at a given phase (Hermitian apart from -i*gamma/2).
+
+        Both Rydberg levels of that atom decay at the same rate; decay_rate selects which
+        atom's lifetime is used (see Hamiltonians.H01).
+        """
         Omega1 = omega_scale * np.exp(1j * phase_i) / 2
         Delta1 = self.Delta1 / self.Omega_Rabi1
         Omega2 = omega_scale/ np.sqrt(3) * np.exp(1j * phase_i) / 2
         Delta2 = self.mj12_split / self.Omega_Rabi1
+        g = self.decay_rate if decay_rate is None else decay_rate
         H = np.array([
             [0, Omega1, Omega2],
             [np.conj(Omega1), Delta1, 0,],
             [np.conj(Omega2), 0 , Delta2]
         ], complex)
-        decay_matrix = np.diag([0, -1j * self.decay_rate / 2, -1j * self.decay_rate/2])
+        decay_matrix = np.diag([0, -1j * g / 2, -1j * g / 2])
         H += decay_matrix
         return H
 
@@ -464,27 +475,45 @@ def phase_cosine_generate(A, w, phi, gamma, pulse_time, resolution):
 def phase_four_cosine_generate(pulse_time, drive_detuning,
                                A1, f1, o1, A2, f2, o2, A3, f3, o3, A4, f4, o4,
                                Omega_Rabi1, resolution):
-    """Four-cosine (CRAB) phase profile, from the Rydberg Simulations notebook's CosineAnsatz.
+    """Four-cosine (CRAB) phase profile.
 
-        phi(t) = (drive_detuning/Omega) t + sum_k A_k cos((t - T/2) f_k/Omega - o_k)
+        phi(t) = (drive_detuning/Omega) t + sum_k A_k cos(t f_k/Omega - o_k),   t in [0, T]
 
-    The parameter order matches the notebook's `inputs` vector, so an initial guess written
-    there can be passed straight through:
+    Time runs from 0, the SAME convention as phase_cosine_generate, so with A2 = A3 = A4 = 0
+    and drive_detuning = 0 this reduces exactly to
+        phase_cosine_generate(A1, f1/Omega_Rabi1, o1, 0, pulse_time, resolution).
 
+    The parameter order matches the notebook's `inputs` vector:
         [pulse_time, drive_detuning, A1, f1, o1, A2, f2, o2, A3, f3, o3, A4, f4, o4]
+    and the pulse duration is part of it (the notebook optimizes over it), which is why it is
+    first and is not read from the Hamiltonian.  Frequencies are absolute (rad/us) and
+    normalised by Omega_Rabi1 here, as in the notebook.
 
-    Unlike phase_cosine_generate, the pulse duration is part of the parameter vector (the
-    notebook optimizes over it), which is why it comes first and is not read from the
-    Hamiltonian.  Frequencies are absolute (rad/us) and normalised by Omega_Rabi1 here, again
-    as in the notebook.
+    NOTE the notebook's CosineAnsatz centres time on the pulse midpoint,
+    cos((t - T/2) f/Omega - o).  That is the same family of pulses with shifted offsets, but a
+    parameter vector fitted there does NOT mean the same pulse here.  Convert it with
+    four_cosine_offsets_from_centred() (o_here = o_notebook + (T/2) f/Omega).
     """
     times = np.linspace(0, pulse_time, resolution)
     dt = times[1] - times[0]
-    centred = times - pulse_time / 2
     phases = (drive_detuning / Omega_Rabi1) * times
     for A, f, o in ((A1, f1, o1), (A2, f2, o2), (A3, f3, o3), (A4, f4, o4)):
-        phases = phases + A * np.cos(centred * (f / Omega_Rabi1) - o)
+        phases = phases + A * np.cos(times * (f / Omega_Rabi1) - o)
     return times, phases, dt
+
+
+def four_cosine_offsets_from_centred(params, Omega_Rabi1):
+    """Convert a notebook-convention four-cosine vector (time centred at T/2) to this one.
+
+    cos((t - T/2) f/Omega - o)  ==  cos(t f/Omega - [o + (T/2) f/Omega]), so only the four
+    phase offsets move.  Returns a new list; the input is not modified.
+    """
+    p = [float(v) for v in params]
+    half_T = p[0] / 2.0
+    for k in range(4):
+        f = p[3 + 3 * k]
+        p[4 + 3 * k] = p[4 + 3 * k] + half_T * (f / Omega_Rabi1)
+    return p
 
 
 def fid_optimize_four_cosine(param, fid_gen):
