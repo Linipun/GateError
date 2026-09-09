@@ -44,20 +44,26 @@ lambda_rydberg = 0.319 #um
 # the dressing is three-level.  Delta_eff = 2pi*1.5 GHz already needs Omega_mw/2pi ~ 2.8 GHz.
 # Set to None for the undressed (no-microwave) limit, i.e. bare Zeeman splitting only.
 HF_split = 2000*np.pi*2 # rad/us
-HF_split = None
+# HF_split = None
+
 alpha_dc = 700 #MHz (V/cm)^-2
 alpha_dc = None
-T_atom = 15 #uK
+
+T_atom = 1 #uK
 lambda_trap = 1.064 #um
-w0_trap = 1.2 #um
-edc_fluc = 10e-3 #V/cm
+w0_trap = 1.064 #um
+edc_fluc = 1e-3 #V/cm
 edc_zero = 0 #V/m
+
 bdc_fluc = 1e-3 #G
+
 num_samples =10000
-rin_strength = 1e-3
+rin_strength = 1e-4
+
 f_hz_hz2 = 220
 f_range = 1e5 # Hz
-efield_fluc_on = True   # add a FLUCTUATING (broadband, no-DC-bias) E-field channel?
+
+efield_fluc_on = False   # add a FLUCTUATING (broadband, no-DC-bias) E-field channel?
 edc_fluc_fast  = 12.5e-3   # V/cm, RMS of the broadband E-field noise
 efield_range   = 2e6    # Hz, bandwidth of the E-field noise; quadratic Stark -> detuning noise up to 2*efield_range
 #### config #######
@@ -69,7 +75,7 @@ atom_d = arg[1] #um
 Omega_Rabi= 10*2*np.pi  #MHz
 Bz = 10 #G
 w0_rydberg = 7.5 #um
-trap_depth = 450 #uK
+trap_depth = 1000 #uK
 ### parameters ####
 
 
@@ -83,7 +89,7 @@ trap_depth = 450 #uK
 
 
 f_Rabis = np.linspace(2, 40, 20)
-f_Rabis = np.array([1.5])
+# f_Rabis = np.array([1.5])
 
 
 if atom_name == "Rb":
