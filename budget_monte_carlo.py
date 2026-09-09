@@ -210,7 +210,7 @@ class LeakageHamiltonians(Hamiltonians):
         Omega1 = omega1_scale * np.exp(1j * phase_i) / 2
         Omega2 = omega2_scale * np.exp(1j * phase_i) / 2
         l_Omega1 = Omega1 / np.sqrt(3)
-        l_Omega2 = Omega1 / np.sqrt(3)
+        l_Omega2 = Omega2 / np.sqrt(3)   # atom 2's leak drive follows atom 2's Rabi
         Delta1 = self.Delta1 / self.Omega_Rabi1
         Stark1 = self.Stark1 / self.Omega_Rabi1
         Stark2 = self.Stark2 / self.Omega_Rabi1
@@ -230,8 +230,8 @@ class LeakageHamiltonians(Hamiltonians):
                 [0, np.conj(Omega2), np.conj(Omega1), 2 * Delta1 + Stark1 + Stark2 + B, 0, 0, 0, 0, 0],
                 [0 ,0, np.conj(l_Omega1), 0 , 2*Delta1+Stark1+Stark2+mf_split, 0, np.conj(Omega2), 0, 0],
                 [0, np.conj(l_Omega2), 0, 0, 0, 2*Delta1+Stark1+Stark2+mf_split, 0, np.conj(Omega1), 0],
-                [np.conj(l_Omega1), 0, 0, 0, Omega2, 0, Delta1+Stark1+mf_split, 0, np.conj(l_Omega2)],
-                [np.conj(l_Omega2), 0, 0, 0, 0, Omega1, 0, Delta1+Stark2+mf_split, np.conj(l_Omega1)],
+                [np.conj(l_Omega1), 0, 0, 0, Omega2, 0, Delta1+Stark1+mf_split, 0, l_Omega2],
+                [np.conj(l_Omega2), 0, 0, 0, 0, Omega1, 0, Delta1+Stark2+mf_split, l_Omega1],
                 [0, 0, 0, 0, 0, 0, np.conj(l_Omega2), np.conj(l_Omega1), B+Stark1+Stark2+2*Delta1+2*mf_split]
             ], complex)
             decay_matrix = np.diag([0, self.decay_rate, self.decay_rate2, self.decay_rate + self.decay_rate2,
@@ -256,9 +256,194 @@ class LeakageHamiltonians(Hamiltonians):
         return H
 
 class FourCosineHamiltonian(Hamiltonians):
+    """Two Rydberg levels per atom (r1 = gate level, r2 = mj 1/2), driven by a 4-cosine phase.
+
+    Ported from "Rydberg Simulations Notebook - Created 09-11-2025 Final1.ipynb"
+    (PulseParameters + Hamiltonians + CosineAnsatz + GateSimulator), so that the notebook's
+    model can be used with the budget machinery.  Pair it with phase_four_cosine_generate and
+    fid_optimize_four_cosine.
+
+    Two-atom basis (9 states); A = atom 1, B = atom 2, "." = ground:
+        0 |1 1>    1 |r1 .>   2 |. r1>   3 |r2 .>   4 |. r2>
+        5 |r1 r1>  6 |r2 r1>  7 |r1 r2>  8 |r2 r2>
+    with the pair shifts B11, B12, B21, B22 on states 5, 6, 7, 8 respectively (the notebook's
+    naming: B12 sits on |r2 r1>, B21 on |r1 r2>).
+
+    r2 is driven at Omega_Rabi2 and detuned by Delta2; for the Cs mj=1/2 leakage level the
+    notebook uses Omega_Rabi2 = sqrt(3) * Omega_Rabi1 and Delta2 = 2*pi*18.7 MHz.
+
+    Differences from the notebook, both deliberate:
+      * Decay is always included (the notebook gates it behind `optimizer == 0`).  Pass
+        r_lifetime = 1e10 to switch it off, as the rest of budget_monte_carlo does.
+      * Per-atom Rabi scalings are supported, so asym_return_fidel works for the motional
+        dOmega channel.  The A/B assignment of every coupling was read off the notebook's
+        matrix; with both scalings at 1 the Hamiltonian is bit-identical to it.
+
+    NOTE on the single-atom terms.  The notebook propagates the two |01>/|10> amplitudes with
+    two DIFFERENT two-level Hamiltonians -- one keeping only r1, the other only r2 (its H01_1
+    and H01_2) -- which is what single_atom="notebook" reproduces.  For a single-species gate a
+    lone atom in |1> is driven to BOTH Rydberg levels, so the physically consistent choice is
+    the three-level propagator (as LeakageHamiltonians.H01 in this file already does); that is
+    single_atom="three_level".  The default is the faithful port.
+    """
+
+    def __init__(self,
+                 Omega_Rabi1,
+                 Omega_Rabi2,
+                 blockade_inf: bool,
+                 blockade_11,
+                 blockade_12,
+                 blockade_21,
+                 blockade_22,
+                 r_lifetime,
+                 r_lifetime2,
+                 Delta1,
+                 Delta2,
+                 pulse_time,
+                 resolution,
+                 single_atom: str = "notebook",
+                 ):
+        # Set before super().__init__: it calls init_parameters(), which needs these.
+        self.Omega_Rabi2 = Omega_Rabi2
+        self.blockade_11 = blockade_11
+        self.blockade_12 = blockade_12
+        self.blockade_21 = blockade_21
+        self.blockade_22 = blockade_22
+        self.Delta2 = Delta2
+        if single_atom not in ("notebook", "three_level"):
+            raise ValueError("single_atom must be 'notebook' or 'three_level'")
+        self.single_atom = single_atom
+        super().__init__(
+            Omega_Rabi1=Omega_Rabi1,
+            blockade_inf=blockade_inf,
+            blockade=blockade_11,       # keeps the base-class attribute meaningful
+            r_lifetime=r_lifetime,
+            r_lifetime2=r_lifetime2,
+            Delta1=Delta1,
+            Stark1=0,
+            Stark2=0,
+            pulse_time=pulse_time,
+            resolution=resolution,
+        )
+
+    def init_parameters(self):
+        assert self.blockade_inf == 0, (
+            "FourCosineHamiltonian only supports finite blockade; the notebook's "
+            "blockade_inf == 1 branch is incomplete (it references initial_psi01_1)."
+        )
+        self.normalized_Omega = self.Omega_Rabi2 / self.Omega_Rabi1
+        self.normalized_blockade_11 = self.blockade_11 / self.Omega_Rabi1
+        self.normalized_blockade_12 = self.blockade_12 / self.Omega_Rabi1
+        self.normalized_blockade_21 = self.blockade_21 / self.Omega_Rabi1
+        self.normalized_blockade_22 = self.blockade_22 / self.Omega_Rabi1
+        self.normalized_blockade = self.normalized_blockade_11
+        self.initial_psi01 = np.array([1, 0], dtype=complex)
+        self.initial_psi01_3 = np.array([1, 0, 0], dtype=complex)
+        self.initial_psi11 = np.zeros(9, dtype=complex)
+        self.initial_psi11[0] = 1
+        self.decay_rate = (1 / self.r_lifetime) / self.Omega_Rabi1
+        self.decay_rate2 = (1 / self.r_lifetime2) / self.Omega_Rabi1
+
+    def H11(self, phase_i, omega1_scale: float = 1.0, omega2_scale: float = 1.0):
+        """Two-atom Hamiltonian; omega1/omega2_scale scale atom A's / atom B's drive."""
+        e = np.exp(1j * phase_i) / 2
+        # Per-atom scalings (motional Rabi inhomogeneity), per level r1 / r2.
+        A1 = omega1_scale * e                                  # excite atom A to r1
+        A2 = omega1_scale * self.normalized_Omega * e          # excite atom A to r2
+        B1 = omega2_scale * e                                  # excite atom B to r1
+        B2 = omega2_scale * self.normalized_Omega * e          # excite atom B to r2
+        Delta1 = self.Delta1 / self.Omega_Rabi1
+        Delta2 = self.Delta2 / self.Omega_Rabi1
+        B_11 = self.normalized_blockade_11
+        B_12 = self.normalized_blockade_12
+        B_21 = self.normalized_blockade_21
+        B_22 = self.normalized_blockade_22
+
+        H = np.zeros((9, 9), dtype=complex)
+        # |11> -> single excitations
+        H[0, 1] = A1;  H[0, 2] = B1;  H[0, 3] = A2;  H[0, 4] = B2
+        # single -> double excitations
+        H[1, 5] = B1;  H[1, 7] = B2          # A:r1 -> +B:r1 / +B:r2
+        H[2, 5] = A1;  H[2, 6] = A2          # B:r1 -> +A:r1 / +A:r2
+        H[3, 6] = B1;  H[3, 8] = B2          # A:r2 -> +B:r1 / +B:r2
+        H[4, 7] = A1;  H[4, 8] = A2          # B:r2 -> +A:r1 / +A:r2
+        H += H.conj().T                      # Hermitian completion (diagonal still zero)
+        np.fill_diagonal(H, [0, Delta1, Delta1, Delta2 - Delta1, Delta2 - Delta1,
+                             2 * Delta1 + B_11, Delta2 + B_12, Delta2 + B_21,
+                             2 * (Delta2 - Delta1) + B_22])
+
+        d1, d2 = self.decay_rate, self.decay_rate2      # per ATOM, as in the notebook
+        decay_matrix = np.diag([0, d1, d2, d1, d2, d1 + d2, d1 + d2, d1 + d2, d1 + d2])
+        H += (-1j * decay_matrix / 2)
+        return H
+
     def H01(self, phase_i, omega_scale: float = 1.0):
+        """Single atom driven on r1 only (the notebook's H01_1)."""
         Omega1 = omega_scale * np.exp(1j * phase_i) / 2
         Delta1 = self.Delta1 / self.Omega_Rabi1
+        H = np.array([
+            [0, Omega1],
+            [np.conj(Omega1), Delta1],
+        ], complex)
+        return H + np.diag([0, -1j * self.decay_rate / 2])
+
+    def H01_2(self, phase_i, omega_scale: float = 1.0):
+        """Single atom driven on r2 only (the notebook's H01_2)."""
+        Omega2 = omega_scale * self.normalized_Omega * np.exp(1j * phase_i) / 2
+        Delta2 = self.Delta2 / self.Omega_Rabi1
+        H = np.array([
+            [0, Omega2],
+            [np.conj(Omega2), Delta2],
+        ], complex)
+        return H + np.diag([0, -1j * self.decay_rate / 2])
+
+    def H01_3level(self, phase_i, omega_scale: float = 1.0, decay_rate=None):
+        """Single atom driven to BOTH Rydberg levels: basis |1>, r1, r2."""
+        e = np.exp(1j * phase_i) / 2
+        Omega1 = omega_scale * e
+        Omega2 = omega_scale * self.normalized_Omega * e
+        Delta1 = self.Delta1 / self.Omega_Rabi1
+        Delta2 = self.Delta2 / self.Omega_Rabi1
+        g = self.decay_rate if decay_rate is None else decay_rate
+        H = np.array([
+            [0, Omega1, Omega2],
+            [np.conj(Omega1), Delta1, 0],
+            [np.conj(Omega2), 0, Delta2],
+        ], complex)
+        return H + np.diag([0, -1j * g / 2, -1j * g / 2])
+
+    def asym_return_fidel(self, phases=None, dt=None, omega1_scale=1, omega2_scale=1):
+        if self.single_atom == "notebook":
+            psiA = self.initial_psi01.copy()
+            psiB = self.initial_psi01.copy()
+        else:
+            psiA = self.initial_psi01_3.copy()
+            psiB = self.initial_psi01_3.copy()
+        psi11 = self.initial_psi11.copy()
+        for phi in phases:
+            if self.single_atom == "notebook":
+                UA = scipy.linalg.expm(-1j * self.H01(phi, omega_scale=omega1_scale) * dt)
+                UB = scipy.linalg.expm(-1j * self.H01_2(phi, omega_scale=omega2_scale) * dt)
+            else:
+                UA = scipy.linalg.expm(-1j * self.H01_3level(
+                    phi, omega_scale=omega1_scale, decay_rate=self.decay_rate) * dt)
+                UB = scipy.linalg.expm(-1j * self.H01_3level(
+                    phi, omega_scale=omega2_scale, decay_rate=self.decay_rate2) * dt)
+            U11 = scipy.linalg.expm(-1j * self.H11(phi, omega1_scale=omega1_scale,
+                                                   omega2_scale=omega2_scale) * dt)
+            psiA = UA @ psiA
+            psiB = UB @ psiB
+            psi11 = U11 @ psi11
+        gpA = psiA[0] / np.abs(psiA[0])
+        gpB = psiB[0] / np.abs(psiB[0])
+        psiA /= gpA
+        psiB /= gpB
+        psi11 /= (gpA * gpB)
+        return self.bell_state_fidelity(psiA, psiB, psi11), (gpA, gpB)
+
+    def return_fidel(self, phases=None, dt=None, omega_scale=1):
+        return self.asym_return_fidel(phases=phases, dt=dt,
+                                      omega1_scale=omega_scale, omega2_scale=omega_scale)
 
 
 def fid_optimize(param, fid_gen):
@@ -274,6 +459,40 @@ def phase_cosine_generate(A, w, phi, gamma, pulse_time, resolution):
     dt = times[1] - times[0]
     phases = A * np.cos(w * times - phi) + gamma * times
     return times, phases, dt
+
+
+def phase_four_cosine_generate(pulse_time, drive_detuning,
+                               A1, f1, o1, A2, f2, o2, A3, f3, o3, A4, f4, o4,
+                               Omega_Rabi1, resolution):
+    """Four-cosine (CRAB) phase profile, from the Rydberg Simulations notebook's CosineAnsatz.
+
+        phi(t) = (drive_detuning/Omega) t + sum_k A_k cos((t - T/2) f_k/Omega - o_k)
+
+    The parameter order matches the notebook's `inputs` vector, so an initial guess written
+    there can be passed straight through:
+
+        [pulse_time, drive_detuning, A1, f1, o1, A2, f2, o2, A3, f3, o3, A4, f4, o4]
+
+    Unlike phase_cosine_generate, the pulse duration is part of the parameter vector (the
+    notebook optimizes over it), which is why it comes first and is not read from the
+    Hamiltonian.  Frequencies are absolute (rad/us) and normalised by Omega_Rabi1 here, again
+    as in the notebook.
+    """
+    times = np.linspace(0, pulse_time, resolution)
+    dt = times[1] - times[0]
+    centred = times - pulse_time / 2
+    phases = (drive_detuning / Omega_Rabi1) * times
+    for A, f, o in ((A1, f1, o1), (A2, f2, o2), (A3, f3, o3), (A4, f4, o4)):
+        phases = phases + A * np.cos(centred * (f / Omega_Rabi1) - o)
+    return times, phases, dt
+
+
+def fid_optimize_four_cosine(param, fid_gen):
+    """Objective for the four-cosine ansatz; `param` is the 14-vector described above."""
+    times, phase, dt = phase_four_cosine_generate(*param, fid_gen.Omega_Rabi1,
+                                                  fid_gen.resolution)
+    fid, global_phi = fid_gen.return_fidel(phases=phase, dt=dt)
+    return 1 - fid
 
 
 def sample_pair_distances(
