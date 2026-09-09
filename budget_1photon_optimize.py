@@ -368,6 +368,79 @@ def batch_infidelity(phases, dt, Omega_Rabi, blockade, delta, w1, w2, r_lifetime
     return 1.0 - fid
 
 
+def batch_infidelity_9(phases, dt, Omega_Rabi, blockade, delta, w1, w2,
+                       mj12_split, r_lifetime, r_lifetime2):
+    """Vectorised LeakageHamiltonians.asym_return_fidel over a batch of samples.
+
+    Basis (as in LeakageHamiltonians.H11):
+      0 |11>  1 |r.>  2 |.r>  3 |rr>  4 |r'r>  5 |rr'>  6 |r'.>  7 |.r'>  8 |r'r'>
+    Single-atom basis: |1>, r, r'.
+    """
+    blockade, delta, w1, w2 = np.broadcast_arrays(
+        np.asarray(blockade, float), np.asarray(delta, float),
+        np.asarray(w1, float), np.asarray(w2, float))
+    S = blockade.size
+    B = (blockade / Omega_Rabi).ravel()
+    D = (delta / Omega_Rabi).ravel()
+    w1 = w1.ravel(); w2 = w2.ravel()
+    mf = mj12_split / Omega_Rabi
+    g1 = (1.0 / r_lifetime) / Omega_Rabi
+    g2 = (1.0 / r_lifetime2) / Omega_Rabi
+
+    psiA = np.zeros((S, 3), complex); psiA[:, 0] = 1     # |01> leg (atom 1 driven)
+    psiB = np.zeros((S, 3), complex); psiB[:, 0] = 1     # |10> leg (atom 2 driven)
+    psi11 = np.zeros((S, 9), complex); psi11[:, 0] = 1
+
+    HA = np.zeros((S, 3, 3), complex); HB = np.zeros((S, 3, 3), complex)
+    H = np.zeros((S, 9, 9), complex)
+    HA[:, 1, 1] = D - 1j * g1 / 2;  HA[:, 2, 2] = D + mf - 1j * g1 / 2
+    HB[:, 1, 1] = D - 1j * g2 / 2;  HB[:, 2, 2] = D + mf - 1j * g2 / 2
+    dg = [0, g1, g2, g1 + g2, g1 + g2, g1 + g2, g1, g2, g1 + g2]
+    diag = np.zeros((S, 9), complex)
+    diag[:, 1] = D; diag[:, 2] = D; diag[:, 3] = 2 * D + B
+    diag[:, 4] = 2 * D + mf; diag[:, 5] = 2 * D + mf
+    diag[:, 6] = D + mf; diag[:, 7] = D + mf
+    diag[:, 8] = B + 2 * D + 2 * mf
+    for k in range(9):
+        diag[:, k] = diag[:, k] - 1j * dg[k] / 2
+
+    r3 = np.sqrt(3.0)
+    for phi in phases:
+        e = np.exp(1j * phi) / 2
+        O1 = w1 * e; O2 = w2 * e
+        l1 = O1 / r3; l2 = O2 / r3
+        O1c, O2c, l1c, l2c = np.conj(O1), np.conj(O2), np.conj(l1), np.conj(l2)
+
+        HA[:, 0, 1] = O1;  HA[:, 1, 0] = O1c
+        HA[:, 0, 2] = l1;  HA[:, 2, 0] = l1c
+        HB[:, 0, 1] = O2;  HB[:, 1, 0] = O2c
+        HB[:, 0, 2] = l2;  HB[:, 2, 0] = l2c
+
+        H[:] = 0
+        for k in range(9):
+            H[:, k, k] = diag[:, k]
+        H[:, 0, 1] = O1;  H[:, 0, 2] = O2;  H[:, 0, 6] = l1;  H[:, 0, 7] = l2
+        H[:, 1, 0] = O1c; H[:, 1, 3] = O2;  H[:, 1, 5] = l2
+        H[:, 2, 0] = O2c; H[:, 2, 3] = O1;  H[:, 2, 4] = l1
+        H[:, 3, 1] = O2c; H[:, 3, 2] = O1c
+        H[:, 4, 2] = l1c; H[:, 4, 6] = O2c
+        H[:, 5, 1] = l2c; H[:, 5, 7] = O1c
+        H[:, 6, 0] = l1c; H[:, 6, 4] = O2;  H[:, 6, 8] = l2
+        H[:, 7, 0] = l2c; H[:, 7, 5] = O1;  H[:, 7, 8] = l1
+        H[:, 8, 6] = l2c; H[:, 8, 7] = l1c
+
+        psiA = np.einsum('sij,sj->si', scipy.linalg.expm(-1j * HA * dt), psiA)
+        psiB = np.einsum('sij,sj->si', scipy.linalg.expm(-1j * HB * dt), psiB)
+        psi11 = np.einsum('sij,sj->si', scipy.linalg.expm(-1j * H * dt), psi11)
+
+    gA = psiA[:, 0] / np.abs(psiA[:, 0])
+    gB = psiB[:, 0] / np.abs(psiB[:, 0])
+    a01 = psiA[:, 0] / gA
+    a10 = psiB[:, 0] / gB
+    a11 = psi11[:, 0] / (gA * gB)
+    return 1.0 - np.abs(1 + a01 + a10 - a11) ** 2 / 16
+
+
 def self_test(verbose=True):
     """Check the batched propagator against Hamiltonians.asym_return_fidel/return_fidel."""
     rng = np.random.default_rng(0)
@@ -402,11 +475,99 @@ def self_test(verbose=True):
         ref_sym.append(1 - fid)
     err_sym = np.max(np.abs(got_sym - np.asarray(ref_sym)))
 
+    # the 9-level (mj=1/2) propagator against LeakageHamiltonians, with Delta1 != 0 so the
+    # leak-level detuning is exercised
+    mj = 2000 * 2 * np.pi
+    got9 = batch_infidelity_9(phases, dt, Omega, blockades, deltas, w1s, w2s, mj, R1, R2)
+    ref9 = []
+    for b, d, a, c_ in zip(blockades, deltas, w1s, w2s):
+        H = LeakageHamiltonians(Omega_Rabi1=Omega, blockade_inf=False, blockade=b,
+                                r_lifetime=R1, r_lifetime2=R2, Delta1=d, Stark1=0, Stark2=0,
+                                resolution=resolution, pulse_time=pulse_time, mj12_split=mj)
+        ref9.append(1 - H.asym_return_fidel(phases=phases, dt=dt, omega1_scale=a,
+                                            omega2_scale=c_)[0])
+    err9 = np.max(np.abs(got9 - np.asarray(ref9)))
+
+    # the 9 states are (atom1, atom2) over |1>, r, r', so with no interaction H11 must be the
+    # tensor sum of the single-atom Hamiltonians.  This is what caught the missing Delta1 in
+    # LeakageHamiltonians.H01.
+    MAP = {(0, 0): 0, (1, 0): 1, (0, 1): 2, (1, 1): 3, (2, 1): 4,
+           (1, 2): 5, (2, 0): 6, (0, 2): 7, (2, 2): 8}
+    P = np.zeros((9, 9))
+    for (a, b), i in MAP.items():
+        P[i, 3 * a + b] = 1.0
+    L = LeakageHamiltonians(Omega_Rabi1=Omega, blockade_inf=False, blockade=0.0, r_lifetime=R1,
+                            r_lifetime2=R2, Delta1=0.3, Stark1=0, Stark2=0,
+                            resolution=resolution, pulse_time=pulse_time, mj12_split=mj)
+    HA = L.H01(0.6, decay_rate=L.decay_rate)
+    HB = L.H01(0.6, decay_rate=L.decay_rate2)
+    T = P @ (np.kron(HA, np.eye(3)) + np.kron(np.eye(3), HB)) @ P.T
+    err_tensor = np.max(np.abs(L.H11(0.6) - T))
+
+    # --- structural invariants: exchange symmetry and the tensor-sum identity ---
+    # Swapping atom 1 <-> 2, with the basis permuted and the two Rabi scalings swapped, must map
+    # H11 onto itself.  This is the check that catches a wrong atom index.
+    def exchange_err(H, P, a=0.9, b=1.1):
+        return max(np.max(np.abs(H.H11(p, omega1_scale=a, omega2_scale=b)[np.ix_(P, P)]
+                                 - H.H11(p, omega1_scale=b, omega2_scale=a)))
+                   for p in (0.0, 0.6, -1.4))
+
+    sym_kw = dict(Omega_Rabi1=Omega, blockade_inf=False, blockade=blockades[0],
+                  r_lifetime=R1, r_lifetime2=R1, Delta1=0, Stark1=0, Stark2=0,
+                  resolution=resolution, pulse_time=pulse_time)
+    err_x4 = exchange_err(Hamiltonians(**sym_kw), [0, 2, 1, 3])
+    err_x9 = exchange_err(LeakageHamiltonians(mj12_split=mj, **sym_kw),
+                          [0, 2, 1, 3, 5, 4, 7, 6, 8])
+    F = FourCosineHamiltonian(Omega_Rabi1=Omega, Omega_Rabi2=Omega / np.sqrt(3), blockade_inf=0,
+                              blockade_11=blockades[0], blockade_12=0.3 * blockades[0],
+                              blockade_21=0.3 * blockades[0], blockade_22=0.7 * blockades[0],
+                              r_lifetime=R1, r_lifetime2=R1, Delta1=0, Delta2=mj,
+                              pulse_time=pulse_time, resolution=resolution)
+    err_xF = exchange_err(F, [0, 2, 1, 4, 3, 5, 7, 6, 8])
+
+    # FourCosineHamiltonian's 9 states are (atom1, atom2) over |1>, r1, r2, so the same
+    # tensor-sum identity applies, using its three-level single-atom Hamiltonian.
+    MAPF = {(0, 0): 0, (1, 0): 1, (0, 1): 2, (2, 0): 3, (0, 2): 4,
+            (1, 1): 5, (2, 1): 6, (1, 2): 7, (2, 2): 8}
+    PF = np.zeros((9, 9))
+    for (a, b), i in MAPF.items():
+        PF[i, 3 * a + b] = 1.0
+
+    def four_tensor_err(Delta1):
+        G = FourCosineHamiltonian(Omega_Rabi1=Omega, Omega_Rabi2=Omega / np.sqrt(3),
+                                  blockade_inf=0, blockade_11=0.0, blockade_12=0.0,
+                                  blockade_21=0.0, blockade_22=0.0, r_lifetime=R1,
+                                  r_lifetime2=R2, Delta1=Delta1, Delta2=mj,
+                                  pulse_time=pulse_time, resolution=resolution)
+        TA = G.H01_3level(0.6, decay_rate=G.decay_rate)
+        TB = G.H01_3level(0.6, decay_rate=G.decay_rate2)
+        return np.max(np.abs(G.H11(0.6)
+                             - PF @ (np.kron(TA, np.eye(3)) + np.kron(np.eye(3), TB)) @ PF.T))
+
+    err_tensorF = four_tensor_err(0.0)
+    # Known deviation inherited from the notebook: its H11 writes the single-r2 diagonals as
+    # Delta2 - Delta1 where the tensor sum wants Delta2, so the identity holds only at
+    # Delta1 = 0 -- the only value the notebook ever uses.  Reported, not asserted, because
+    # changing it would break parity with the notebook this class is a port of.
+    err_tensorF_det = four_tensor_err(0.3)
+
     if verbose:
         print(f"self-test: max |batched - asym_return_fidel| = {err_asym:.3e}")
         print(f"self-test: max |batched - return_fidel|      = {err_sym:.3e}")
+        print(f"self-test: max |batched_9 - Leakage asym|    = {err9:.3e}")
+        print(f"self-test: |H11(B=0) - tensor sum| (Delta1=0.3) = {err_tensor:.3e}")
+        print(f"self-test: exchange symmetry 4-level / Leakage / FourCosine = "
+              f"{err_x4:.3e} / {err_x9:.3e} / {err_xF:.3e}")
+        print(f"self-test: FourCosine tensor sum at Delta1=0 = {err_tensorF:.3e}")
+        print(f"           at Delta1=0.3 it is {err_tensorF_det:.3e}: expected, the notebook's "
+              f"H11 uses\n           Delta2-Delta1 on the single-r2 diagonals and only ever "
+              f"runs at Delta1=0")
     assert err_asym < 1e-11 and err_sym < 1e-11, "batched propagator disagrees with reference"
-    return max(err_asym, err_sym)
+    assert err9 < 1e-11, "batched 9-level propagator disagrees with LeakageHamiltonians"
+    assert err_tensor < 1e-10, "H11 is not the tensor sum of the single-atom Hamiltonians"
+    assert max(err_x4, err_x9, err_xF) < 1e-12, "H11 is not symmetric under atom exchange"
+    assert err_tensorF < 1e-10, "FourCosine H11 is not the tensor sum at Delta1 = 0"
+    return max(err_asym, err_sym, err9)
 
 
 # -----------------------------

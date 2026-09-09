@@ -255,7 +255,12 @@ class LeakageHamiltonians(Hamiltonians):
         Omega1 = omega_scale * np.exp(1j * phase_i) / 2
         Delta1 = self.Delta1 / self.Omega_Rabi1
         Omega2 = omega_scale/ np.sqrt(3) * np.exp(1j * phase_i) / 2
-        Delta2 = self.mj12_split / self.Omega_Rabi1
+        # The leak level sits mj12_split above the gate level, so the laser detuning from it is
+        # Delta1 + mj12_split. H11 has always had this (its single-leak diagonals are
+        # Delta1 + Stark + mf_split); H01 used mj12_split alone, which is invisible at
+        # Delta1 = 0 (all this class was ever called with) but wrong as soon as the detuning
+        # channel is evaluated in the 9-level model.
+        Delta2 = (self.Delta1 + self.mj12_split) / self.Omega_Rabi1
         g = self.decay_rate if decay_rate is None else decay_rate
         H = np.array([
             [0, Omega1, Omega2],
