@@ -464,27 +464,45 @@ def phase_cosine_generate(A, w, phi, gamma, pulse_time, resolution):
 def phase_four_cosine_generate(pulse_time, drive_detuning,
                                A1, f1, o1, A2, f2, o2, A3, f3, o3, A4, f4, o4,
                                Omega_Rabi1, resolution):
-    """Four-cosine (CRAB) phase profile, from the Rydberg Simulations notebook's CosineAnsatz.
+    """Four-cosine (CRAB) phase profile.
 
-        phi(t) = (drive_detuning/Omega) t + sum_k A_k cos((t - T/2) f_k/Omega - o_k)
+        phi(t) = (drive_detuning/Omega) t + sum_k A_k cos(t f_k/Omega - o_k),   t in [0, T]
 
-    The parameter order matches the notebook's `inputs` vector, so an initial guess written
-    there can be passed straight through:
+    Time runs from 0, the SAME convention as phase_cosine_generate, so with A2 = A3 = A4 = 0
+    and drive_detuning = 0 this reduces exactly to
+        phase_cosine_generate(A1, f1/Omega_Rabi1, o1, 0, pulse_time, resolution).
 
+    The parameter order matches the notebook's `inputs` vector:
         [pulse_time, drive_detuning, A1, f1, o1, A2, f2, o2, A3, f3, o3, A4, f4, o4]
+    and the pulse duration is part of it (the notebook optimizes over it), which is why it is
+    first and is not read from the Hamiltonian.  Frequencies are absolute (rad/us) and
+    normalised by Omega_Rabi1 here, as in the notebook.
 
-    Unlike phase_cosine_generate, the pulse duration is part of the parameter vector (the
-    notebook optimizes over it), which is why it comes first and is not read from the
-    Hamiltonian.  Frequencies are absolute (rad/us) and normalised by Omega_Rabi1 here, again
-    as in the notebook.
+    NOTE the notebook's CosineAnsatz centres time on the pulse midpoint,
+    cos((t - T/2) f/Omega - o).  That is the same family of pulses with shifted offsets, but a
+    parameter vector fitted there does NOT mean the same pulse here.  Convert it with
+    four_cosine_offsets_from_centred() (o_here = o_notebook + (T/2) f/Omega).
     """
     times = np.linspace(0, pulse_time, resolution)
     dt = times[1] - times[0]
-    centred = times - pulse_time / 2
     phases = (drive_detuning / Omega_Rabi1) * times
     for A, f, o in ((A1, f1, o1), (A2, f2, o2), (A3, f3, o3), (A4, f4, o4)):
-        phases = phases + A * np.cos(centred * (f / Omega_Rabi1) - o)
+        phases = phases + A * np.cos(times * (f / Omega_Rabi1) - o)
     return times, phases, dt
+
+
+def four_cosine_offsets_from_centred(params, Omega_Rabi1):
+    """Convert a notebook-convention four-cosine vector (time centred at T/2) to this one.
+
+    cos((t - T/2) f/Omega - o)  ==  cos(t f/Omega - [o + (T/2) f/Omega]), so only the four
+    phase offsets move.  Returns a new list; the input is not modified.
+    """
+    p = [float(v) for v in params]
+    half_T = p[0] / 2.0
+    for k in range(4):
+        f = p[3 + 3 * k]
+        p[4 + 3 * k] = p[4 + 3 * k] + half_T * (f / Omega_Rabi1)
+    return p
 
 
 def fid_optimize_four_cosine(param, fid_gen):
