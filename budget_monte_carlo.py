@@ -132,16 +132,21 @@ class Hamiltonians:
             H += (-1j * decay_matrix / 2)
         return H
 
-    def H01(self, phase_i, omega_scale: float = 1.0):
-        """Single-atom Hamiltonian at a given phase (Hermitian)."""
+    def H01(self, phase_i, omega_scale: float = 1.0, decay_rate=None):
+        """Single-atom Hamiltonian at a given phase (Hermitian apart from -i*gamma/2).
+
+        decay_rate defaults to atom 1's; pass self.decay_rate2 for the atom-2 term, otherwise
+        an asymmetric pair (r_lifetime != r_lifetime2) silently gets atom 1's lifetime twice.
+        """
         Omega1 = omega_scale * np.exp(1j * phase_i) / 2
         Delta1 = self.Delta1 / self.Omega_Rabi1
+        g = self.decay_rate if decay_rate is None else decay_rate
 
         H = np.array([
             [0, Omega1],
             [np.conj(Omega1), Delta1],
         ], complex)
-        decay_matrix = np.diag([0, -1j * self.decay_rate / 2])
+        decay_matrix = np.diag([0, -1j * g / 2])
         H += decay_matrix
         return H
 
@@ -157,7 +162,8 @@ class Hamiltonians:
         psi11 = self.initial_psi11.copy()
         for phi in phases:
             U01 = scipy.linalg.expm(-1j * self.H01(phi, omega_scale=omega1_scale) * dt)
-            U10 = scipy.linalg.expm(-1j * self.H01(phi, omega_scale=omega2_scale) * dt)
+            U10 = scipy.linalg.expm(-1j * self.H01(phi, omega_scale=omega2_scale,
+                                                   decay_rate=self.decay_rate2) * dt)
             U11 = scipy.linalg.expm(-1j * self.H11(phi, omega1_scale=omega1_scale, omega2_scale= omega2_scale) * dt)
             psi01 = U01 @ psi01
             psi10 = U10 @ psi10
@@ -240,18 +246,23 @@ class LeakageHamiltonians(Hamiltonians):
             H += (-1j * decay_matrix / 2)
         return H
 
-    def H01(self, phase_i, omega_scale: float = 1.0):
-        """Single-atom Hamiltonian at a given phase (Hermitian)."""
+    def H01(self, phase_i, omega_scale: float = 1.0, decay_rate=None):
+        """Single-atom Hamiltonian at a given phase (Hermitian apart from -i*gamma/2).
+
+        Both Rydberg levels of that atom decay at the same rate; decay_rate selects which
+        atom's lifetime is used (see Hamiltonians.H01).
+        """
         Omega1 = omega_scale * np.exp(1j * phase_i) / 2
         Delta1 = self.Delta1 / self.Omega_Rabi1
         Omega2 = omega_scale/ np.sqrt(3) * np.exp(1j * phase_i) / 2
         Delta2 = self.mj12_split / self.Omega_Rabi1
+        g = self.decay_rate if decay_rate is None else decay_rate
         H = np.array([
             [0, Omega1, Omega2],
             [np.conj(Omega1), Delta1, 0,],
             [np.conj(Omega2), 0 , Delta2]
         ], complex)
-        decay_matrix = np.diag([0, -1j * self.decay_rate / 2, -1j * self.decay_rate/2])
+        decay_matrix = np.diag([0, -1j * g / 2, -1j * g / 2])
         H += decay_matrix
         return H
 

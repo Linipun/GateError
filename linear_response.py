@@ -94,13 +94,21 @@ def step_unitary(H: np.ndarray, dt_: float) -> np.ndarray:
 
 
 def propagate_U(phases, dt, B) -> np.ndarray:
+    """Propagators U(0 -> t_k), using the MIDPOINT phase of each step.
+
+    The step used to be evaluated at the end-point phase, phases[k+1], which is only
+    first-order accurate and disagreed with linear_response_2photon.propagate_U_2photon, which
+    has always used the midpoint. At resolution 200 the two differ by 0.7% in I_I and 0.6% in
+    I_f, and the end-point rule is still drifting by 1.2% between 200 and 1600 steps while the
+    midpoint rule is converged to 0.02%.
+    """
     Nt = len(phases)
     U = np.eye(dim, dtype=complex)
     Us = np.empty((Nt, dim, dim), dtype=complex)
     Us[0] = U
     for k in range(Nt - 1):
-        # tm = 0.5 * (t[k] + t[k + 1])
-        U = step_unitary(H0(phases[k + 1], B=B), dt) @ U
+        phase_i = 0.5 * (phases[k] + phases[k + 1])
+        U = step_unitary(H0(phase_i, B=B), dt) @ U
         Us[k + 1] = U
     return Us
 
