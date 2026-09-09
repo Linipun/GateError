@@ -210,7 +210,7 @@ class LeakageHamiltonians(Hamiltonians):
         Omega1 = omega1_scale * np.exp(1j * phase_i) / 2
         Omega2 = omega2_scale * np.exp(1j * phase_i) / 2
         l_Omega1 = Omega1 / np.sqrt(3)
-        l_Omega2 = Omega1 / np.sqrt(3)
+        l_Omega2 = Omega2 / np.sqrt(3)   # atom 2's leak drive follows atom 2's Rabi
         Delta1 = self.Delta1 / self.Omega_Rabi1
         Stark1 = self.Stark1 / self.Omega_Rabi1
         Stark2 = self.Stark2 / self.Omega_Rabi1
@@ -230,8 +230,8 @@ class LeakageHamiltonians(Hamiltonians):
                 [0, np.conj(Omega2), np.conj(Omega1), 2 * Delta1 + Stark1 + Stark2 + B, 0, 0, 0, 0, 0],
                 [0 ,0, np.conj(l_Omega1), 0 , 2*Delta1+Stark1+Stark2+mf_split, 0, np.conj(Omega2), 0, 0],
                 [0, np.conj(l_Omega2), 0, 0, 0, 2*Delta1+Stark1+Stark2+mf_split, 0, np.conj(Omega1), 0],
-                [np.conj(l_Omega1), 0, 0, 0, Omega2, 0, Delta1+Stark1+mf_split, 0, np.conj(l_Omega2)],
-                [np.conj(l_Omega2), 0, 0, 0, 0, Omega1, 0, Delta1+Stark2+mf_split, np.conj(l_Omega1)],
+                [np.conj(l_Omega1), 0, 0, 0, Omega2, 0, Delta1+Stark1+mf_split, 0, l_Omega2],
+                [np.conj(l_Omega2), 0, 0, 0, 0, Omega1, 0, Delta1+Stark2+mf_split, l_Omega1],
                 [0, 0, 0, 0, 0, 0, np.conj(l_Omega2), np.conj(l_Omega1), B+Stark1+Stark2+2*Delta1+2*mf_split]
             ], complex)
             decay_matrix = np.diag([0, self.decay_rate, self.decay_rate2, self.decay_rate + self.decay_rate2,
