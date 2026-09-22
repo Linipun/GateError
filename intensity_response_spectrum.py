@@ -25,6 +25,32 @@ near 2 pi f / Omega ~ 0.3 before falling, and every beam shows lobe structure pa
 the knee -- so a noise tone parked in a lobe is weighted more than the smooth
 roll-off would suggest.
 
+The bump at 2 pi f / Omega ~ 1.2
+--------------------------------
+Arm 2's curve does not roll off monotonically: it comes back up to ~96% of its DC
+value near 2 pi f / Omega = 1.18 (f ~ 24 MHz for a 20 MHz gate). This is a
+dressed-state resonance -- noise at the Rabi frequency resonantly drives transitions
+between the dressed states of the driven atom -- and it appears only for
+DETUNING-like noise. An amplitude operator points along the drive axis and is nearly
+static in the dressed frame, so it has no such resonance; a sigma_z-like operator
+rotates at the Rabi frequency and does. That is exactly the arm-1/arm-2 split: arm 2
+acts through the light shift, i.e. as detuning, so it resonates, while arm 1 and the
+1-photon gate are genuine amplitude noise and do not. Numerically the DC-normalised
+arm-2 curve tracks the detuning response to 7%, against 70% for arm 1.
+
+There are really TWO resonances, at Omega for the singly excited logical states and
+at sqrt(2) Omega for the blockaded |11> (collective enhancement). The gate is short,
+so each is Fourier-broadened to ~2 pi / (Omega T) = 0.82 in 2 pi f / Omega, wider
+than their 0.41 separation, and they merge into the one broad bump seen here.
+Driving at constant phase and stretching the pulse splits them back apart, which is
+how the above was checked: peaks at x = 1.127 (merged) for Omega T = 7.65, 1.002 and
+1.403 at Omega T = 30, and 1.000 and 1.414 at Omega T = 120.
+
+Practically: do not assume the gate low-passes RIN away. This resonance fills in the
+roll-off, which is why arm 2's -3 dB point sits out at 1.63 -- intensity noise on the
+1038 nm arm counts at close to full weight all the way out to ~1.6x the Rabi
+frequency, i.e. to ~33 MHz for a 20 MHz gate.
+
 One curve per independently-noisy beam
 --------------------------------------
 The two 2-photon arms are NOT plotted as a single total, because they are not the
