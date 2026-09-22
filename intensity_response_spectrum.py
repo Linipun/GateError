@@ -25,6 +25,29 @@ near 2 pi f / Omega ~ 0.3 before falling, and every beam shows lobe structure pa
 the knee -- so a noise tone parked in a lobe is weighted more than the smooth
 roll-off would suggest.
 
+Not every bump is physical: the blockade-aliasing trap
+------------------------------------------------------
+The toggling-frame operator carries the |rr> phase rotating at the blockade B, and
+the kernel samples it at dt. Once B*dt > pi that rotation is undersampled and folds
+back to |B*dt mod 2pi| / dt -- a sharp, tall, entirely spurious peak that can land
+in the middle of the plotted band. It is easy to mistake for a resonance, so the
+tells are worth knowing: it sits at a FIXED ABSOLUTE frequency (independent of both
+Omega and Delta, unlike any real feature of this system), it MOVES with the time
+grid, and it has no counterpart in the H_eff level spacings, which here are only
+~Omega (dressed states) and ~B (blockade).
+
+Concretely, at Omega/2pi = 1 MHz with B/Omega = 841 and resolution 1000 it produced
+a fake peak at 20 MHz, two orders of magnitude above the true response, drifting
+22.4 -> 20.8 -> 20.0 MHz as the resolution went 250 -> 500 -> 1000 and disappearing
+once B*dt < pi. `spectrum` now raises the resolution per run until B*dt < pi/2 and
+says so when it does. This bites at LOW Rabi frequency, where B/Omega is largest.
+
+Only the SPECTRUM is affected. At omega = 0 the fast blockade oscillation
+contributes almost nothing to the double time integral, so the quasi-static numbers
+in budget_noise_response_scan.py are fine at its resolution of 200 -- checked
+against resolution 6000 at 2, 10 and 25 MHz, where they agree to better than 1.6%
+even with B*dt as large as 16 rad.
+
 The bump at 2 pi f / Omega ~ 1.2
 --------------------------------
 Arm 2's curve does not roll off monotonically: it comes back up to ~96% of its DC
@@ -174,15 +197,30 @@ def spectrum(cfg):
                                                       cfg['x_num']), f_common]))
         x = f_abs / f_Rabi                  # = 2 pi f / Omega, this run's normalized axis
 
+        # The time step has to resolve the BLOCKADE, not just the Rabi frequency. The
+        # toggling-frame operator carries the |rr> phase rotating at B, and sampling it
+        # at dt folds everything above pi/dt back down: once B*dt > pi the fold lands at
+        # |B*dt mod 2pi|/dt, which is a sharp spurious peak sitting in the middle of the
+        # plotted band. At Omega/2pi = 1 MHz, B/Omega = 841 and resolution 1000 it put a
+        # fake resonance at 20 MHz, two orders of magnitude above the true response, and
+        # it moved with the grid (22.4 / 20.8 / 20.0 MHz at resolution 250 / 500 / 1000)
+        # before vanishing once B*dt < pi. Requiring B*dt < pi/2 keeps it out.
+        # It bites at LOW Rabi frequency, where B/Omega is largest.
+        res = max(cfg['resolution'],
+                  int(np.ceil(2 * cfg['pulse_time'] * max(B_1p, B_2p) / (np.pi * Omega))) + 1)
+        if res > cfg['resolution']:
+            print(f" [resolution {cfg['resolution']} -> {res} to resolve B/Omega ="
+                  f" {max(B_1p, B_2p) / Omega:.0f}]", end="", flush=True)
+
         # ---- 1-photon: normalized units, so x is passed straight through ----
         phase, dt, TO_1p, _ = optimal_phase(Omega, B_1p, cfg['pulse_time'],
-                                            cfg['resolution'], tau_1p)
+                                            res, tau_1p)
         o_I = build_Oseq(phases=phase, dt=dt, B=B_1p / Omega, is_intensity=True)
         I_1p = response_G13_spectrum(o_I, S_haar, x, dt=dt)
 
         # ---- 2-photon: real units, so x must be converted to rad/us ----
         phase2, dt2, TO_2p, _ = optimal_phase(Omega, B_2p, cfg['pulse_time'],
-                                              cfg['resolution'], tau_2p)
+                                              res, tau_2p)
         Omega1 = Omega2 = np.sqrt(2 * Omega * Delta)        # balanced arms
         delta1 = ktr_1 * Omega1 ** 2 + ktr_2 * Omega2 ** 2  # cancel the background light shift
         dt_real = dt2 / Omega                               # us
