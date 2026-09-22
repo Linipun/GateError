@@ -269,9 +269,17 @@ BEAMS = [('I_1p', RAMP_1PHOTON[1], '1-photon (319 nm)', '1-photon'),
          ('I2_2p', RAMP_2PHOTON[2], '2-photon arm 2 (1038 nm)', 'arm 2')]
 
 # Rabi frequency is carried by linestyle, not color, since color is spent on the beam.
-# The lowest Rabi frequency is drawn wide so that where the curves collapse in panel (a)
-# the overlap reads as a result rather than as a missing curve.
-RABI_STYLES = [('-', 4.5), ('--', 2.0), (':', 2.0), ('-.', 2.0)]
+# All one weight: where the curves collapse in panel (a) the dashes let the solid curve
+# underneath show through, so the overlap still reads without a heavier line.
+RABI_STYLES = [('-', 2.0), ('--', 2.0), (':', 2.0), ('-.', 2.0)]
+
+# One place to set every text size in the figure.
+FS_SUPTITLE = 17
+FS_PANEL_TITLE = 15
+FS_AXIS_LABEL = 14
+FS_TICK = 12
+FS_LEGEND = 12
+FS_ANNOT = 11
 
 
 def make_figure(data, cfg, path):
@@ -279,12 +287,12 @@ def make_figure(data, cfg, path):
     x_max = data.get('x_max', cfg['x_max'])
     f_max_abs = data.get('f_max_abs', x_max * max(r['f_Rabi'] for r in runs))
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.0, 5.2))
+    fig, axes = plt.subplots(1, 2, figsize=(13.0, 6.0))
     ax_n, ax_a = axes
 
     for ax in axes:
         ax.set_yscale('log')
-        ax.set_ylabel(r'Intensity-noise response  $I_I(\omega)$')
+        ax.set_ylabel(r'Intensity-noise response  $I_I(\omega)$', fontsize=FS_AXIS_LABEL)
         ax.grid(True, which='major', color=GRID, linewidth=0.7, zorder=0)
         ax.grid(True, which='minor', color=GRID, linewidth=0.35, alpha=0.6, zorder=0)
         ax.set_axisbelow(True)
@@ -292,7 +300,7 @@ def make_figure(data, cfg, path):
             ax.spines[side].set_visible(False)
         for side in ('left', 'bottom'):
             ax.spines[side].set_color('#c3c2b7')
-        ax.tick_params(colors=MUTED, labelsize=9)
+        ax.tick_params(colors=MUTED, labelsize=FS_TICK)
 
     # Beams outer, Rabi inner: with a 3-column legend (filled column-major) each beam
     # then gets its own column, with its Rabi frequencies stacked underneath it.
@@ -310,9 +318,9 @@ def make_figure(data, cfg, path):
             ax_a.plot(f_abs, y, color=color, lw=lw, ls=ls, zorder=3, label=lab)
 
     ax_n.set_xlim(0, x_max)
-    ax_n.set_xlabel(r'Normalized noise frequency  $2\pi f/\Omega$')
+    ax_n.set_xlabel(r'Normalized noise frequency  $2\pi f/\Omega$', fontsize=FS_AXIS_LABEL)
     ax_n.set_title('(a)  Universal filter shape', loc='left', color=INK,
-                   fontsize=11, fontweight='bold')
+                   fontsize=FS_PANEL_TITLE, fontweight='bold')
     # -3 dB point of each beam, from the lowest-Rabi run (they agree across runs). The
     # dotted verticals sit in the empty band between the arm-2 curve and the other two;
     # the values are quoted in the annotation rather than labelled on the axis, which
@@ -332,20 +340,20 @@ def make_figure(data, cfg, path):
     #               + r'$-3$ dB at $2\pi f/\Omega$ = '
     #               + ', '.join(f'{v:.2f} ({nm})' for v, nm in cuts),
     #               xy=(0.03, 0.74), xycoords='axes fraction', ha='left', va='top',
-    #               fontsize=8, color=MUTED, style='italic')
+    #               fontsize=FS_ANNOT, color=MUTED, style='italic')
 
     # ax_a.set_xscale('log')
     ax_a.set_xlim(0, f_max_abs)         # every curve now spans this full range
-    ax_a.set_xlabel(r'Noise frequency  $f$  [MHz]')
+    ax_a.set_xlabel(r'Noise frequency  $f$  [MHz]', fontsize=FS_AXIS_LABEL)
     ax_a.set_title('(b)  Same curves vs absolute noise frequency', loc='left', color=INK,
-                   fontsize=11, fontweight='bold')
+                   fontsize=FS_PANEL_TITLE, fontweight='bold')
     # ax_a.annotate('a faster gate pushes the roll-off out,\nso it integrates RIN over '
     #               'a wider band',
     #               xy=(0.03, 0.05), xycoords='axes fraction', ha='left', va='bottom',
-    #               fontsize=8, color=MUTED, style='italic')
+    #               fontsize=FS_ANNOT, color=MUTED, style='italic')
 
     handles, labels = ax_n.get_legend_handles_labels()
-    fig.legend(handles, labels, ncol=len(BEAMS), fontsize=8.5, frameon=False,
+    fig.legend(handles, labels, ncol=len(BEAMS), fontsize=FS_LEGEND, frameon=False,
                labelcolor=MUTED, loc='lower center', bbox_to_anchor=(0.5, -0.02),
                handlelength=2.6, columnspacing=2.2)
 
@@ -355,8 +363,8 @@ def make_figure(data, cfg, path):
     #        rf"$\Delta/2\pi={cfg['inter_detuning'] / 2 / np.pi / 1e3:.0f}$ GHz, per beam)  |  "
     #        rf"time-optimal CZ, $\Omega T={cfg['pulse_time']:g}$")
     fig.suptitle('Intensity-noise response vs noise frequency', x=0.008, y=1.0,
-                 ha='left', va='top', fontsize=13, fontweight='bold', color=INK)
-    # fig.text(0.008, 0.95, sub, ha='left', va='top', fontsize=8.5, color=MUTED)
+                 ha='left', va='top', fontsize=FS_SUPTITLE, fontweight='bold', color=INK)
+    # fig.text(0.008, 0.95, sub, ha='left', va='top', fontsize=FS_ANNOT, color=MUTED)
     fig.tight_layout(rect=(0, 0.05, 1, 0.92))
     for ext in ('pdf', 'png'):
         fig.savefig(f'{path}.{ext}', dpi=200, bbox_inches='tight', facecolor='white')
