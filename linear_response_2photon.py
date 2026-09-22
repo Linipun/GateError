@@ -1,4 +1,5 @@
 import numpy as np
+from functools import lru_cache
 from arc import *
 dim = 9
 idx = {"00":0, "01":1, "10":2, "11":3, "0r":4, "r0":5, "1r":6, "r1":7, "rr":8}
@@ -244,8 +245,18 @@ def propagate_U_2photon(phases, dt, B, Omega1, Omega2, delta1, delta2, Delta, in
         Us[k+1] = U
     return Us
 
-def build_Oseq_2photon(phases, dt, B, Omega1, Omega2, delta1, delta2, Delta, inter_detuning, n,  Oinst_func):
-    Nt = len(phases)
+@lru_cache(maxsize=None)
+def compute_ktildes(n, Delta, inter_detuning):
+    """The four kappa-tilde light-shift coefficients of Eqs. (K7)-(K9), for Cs
+    6S1/2 -> 7P1/2 -> nS1/2.
+
+    Factored out of build_Oseq_2photon so a scan over Rabi frequency (which leaves
+    n, Delta and inter_detuning fixed) pays the ARC DynamicPolarizability basis
+    construction once instead of once per point; the numbers are unchanged. Callers
+    that need delta1 = ktilder_1*Omega1^2 + ktilder_2*Omega2^2 can use this directly.
+
+    Returns (ktilde0_1, ktilder_1, ktilde0_2, ktilder_2).
+    """
     atom = Cesium()
     v_photon1 = atom.getTransitionFrequency(n1=6, l1=0, j1=1 / 2, n2=7, l2=1, j2=1 / 2, s=0.5)
     v_photon1 += inter_detuning * 1e6 / 2 / np.pi
@@ -276,6 +287,13 @@ def build_Oseq_2photon(phases, dt, B, Omega1, Omega2, delta1, delta2, Delta, int
 
     ktilde0_2 = 0.0
     ktilder_2 = (alpha_1_2 * 2 * np.pi * 1e6) / 4 / d2 ** 2
+
+    return ktilde0_1, ktilder_1, ktilde0_2, ktilder_2
+
+
+def build_Oseq_2photon(phases, dt, B, Omega1, Omega2, delta1, delta2, Delta, inter_detuning, n,  Oinst_func):
+    Nt = len(phases)
+    ktilde0_1, ktilder_1, ktilde0_2, ktilder_2 = compute_ktildes(n, Delta, inter_detuning)
 
     Us = propagate_U_2photon(phases, dt, B, Omega1, Omega2, delta1, delta2, Delta, inter_detuning, n,ktilde0_1,
                              ktilder_1, ktilde0_2, ktilder_2)
