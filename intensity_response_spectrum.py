@@ -21,12 +21,26 @@ the pulse. The roll-off therefore sits at the gate bandwidth, which is why the t
 Rabi frequencies produce the same shape in units of Omega but decade-shifted in Hz.
 
 It is not exactly monotonic -- the 1-photon curve peaks ~2-4% above its DC value
-near 2 pi f / Omega ~ 0.3 before falling, and both gates show lobe structure past
+near 2 pi f / Omega ~ 0.3 before falling, and every beam shows lobe structure past
 the knee -- so a noise tone parked in a lobe is weighted more than the smooth
-roll-off would suggest. The -3 dB points printed by the scan are ~0.8 (1-photon)
-and ~1.6 (2-photon) in units of 2 pi f / Omega: the 2-photon filter is about twice
-as wide, because its intensity response is dominated by the light-shift (detuning)
-term rather than by the Rabi-amplitude term.
+roll-off would suggest.
+
+One curve per independently-noisy beam
+--------------------------------------
+The two 2-photon arms are NOT plotted as a single total, because they are not the
+same filter. In units of 2 pi f / Omega the -3 dB points are
+
+    2-photon arm 1 (459 nm)  : 0.48    <- narrowest
+    1-photon       (319 nm)  : 0.80
+    2-photon arm 2 (1038 nm) : 1.63    <- widest
+
+so arm 1 is actually a tighter filter than the 1-photon gate, while arm 2 is twice
+as wide. Arm 2 also carries ~80x arm 1's DC response (its polarizability shifts
+|1>, making its RIN a detuning error rather than an amplitude one), so it both
+dominates the total and integrates over the widest band -- which is why a total
+would have looked like "the 2-photon curve" and hidden the fact that the 459 nm arm
+is the best-behaved beam of the three. Summing them is only correct when both arms
+carry the same RIN; with per-arm noise levels, weight each curve separately.
 
 Panels
 ------
@@ -38,9 +52,9 @@ Panels
       sensitive to. This is the same data as (a) with the x-axis rescaled by
       f_Rabi, so no extra computation.
 
-The 2-photon curve is the total over both arms (arm 1 at 459 nm + arm 2 at 1038 nm),
-which is what a gate driven by two equally-noisy beams sees; the arms are computed
-separately and saved to the JSON, since arm 2 dominates by ~80x.
+Curves are one per independently-noisy beam -- the 1-photon gate's 319 nm beam and
+each of the two 2-photon arms separately -- so nothing is pre-summed and the three
+filters can be compared directly. The JSON also stores their sum as I_2p.
 
 Units, following the two linear_response modules
 ------------------------------------------------
@@ -126,9 +140,12 @@ def spectrum(cfg):
         runs.append(dict(f_Rabi=float(f_Rabi), TO_1p=float(TO_1p), TO_2p=float(TO_2p),
                          I_1p=I_1p.tolist(), I1_2p=I1_2p.tolist(), I2_2p=I2_2p.tolist(),
                          I_2p=(I1_2p + I2_2p).tolist()))
-        print(f" I_I(0): 1p {I_1p[0]:.3f}  2p {I1_2p[0] + I2_2p[0]:.1f}"
-              f"   -3dB at 2pi f/Omega = {_half_power(x, I_1p):.2f} (1p),"
-              f" {_half_power(x, I1_2p + I2_2p):.2f} (2p)")
+        print(f"\n      1-photon      : I_I(0) = {I_1p[0]:9.3f}   -3dB at 2pi f/Omega = "
+              f"{_half_power(x, I_1p):.2f}")
+        print(f"      2p arm1 (459) : I_I(0) = {I1_2p[0]:9.3f}   -3dB at 2pi f/Omega = "
+              f"{_half_power(x, I1_2p):.2f}")
+        print(f"      2p arm2 (1038): I_I(0) = {I2_2p[0]:9.3f}   -3dB at 2pi f/Omega = "
+              f"{_half_power(x, I2_2p):.2f}")
 
     return dict(x=x.tolist(), runs=runs,
                 blockade_1p_MHz=B_1p / 2 / np.pi, blockade_2p_MHz=B_2p / 2 / np.pi)
@@ -148,15 +165,24 @@ def _half_power(x, y):
     return float(x[i - 1] + t * (x[i] - x[i - 1]))
 
 
+# One entry per independently-noisy beam. Colors match budget_noise_response_scan.py
+# so the two figures read as one set: blue = 1-photon, the two 2-photon arms as a light
+# and a dark step of the orange ramp.
+BEAMS = [('I_1p', RAMP_1PHOTON[1], '1-photon (319 nm)', '1-photon'),
+         ('I1_2p', RAMP_2PHOTON[0], '2-photon arm 1 (459 nm)', 'arm 1'),
+         ('I2_2p', RAMP_2PHOTON[2], '2-photon arm 2 (1038 nm)', 'arm 2')]
+
+# Rabi frequency is carried by linestyle, not color, since color is spent on the beam.
+# The lowest Rabi frequency is drawn wide so that where the curves collapse in panel (a)
+# the overlap reads as a result rather than as a missing curve.
+RABI_STYLES = [('-', 4.5), ('--', 2.0), (':', 2.0), ('-.', 2.0)]
+
+
 def make_figure(data, cfg, path):
     x = np.asarray(data['x'])
     runs = data['runs']
-    # Rabi frequency is an ordered quantity, so it gets lightness steps of each gate's
-    # hue (light = low Rabi); the gate keeps hue + linestyle. Both ramp steps used here
-    # are from the validated palette and are ~39 apart in OKLab dE.
-    shades = [0, 2] if len(runs) <= 2 else list(range(len(runs)))
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.0, 5.0))
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 5.2))
     ax_n, ax_a = axes
 
     for ax in axes:
@@ -171,27 +197,40 @@ def make_figure(data, cfg, path):
             ax.spines[side].set_color('#c3c2b7')
         ax.tick_params(colors=MUTED, labelsize=9)
 
-    for i, (run, s) in enumerate(zip(runs, shades)):
-        fR = run['f_Rabi']
-        # In panel (a) the Rabi frequencies collapse onto each other, so the lowest one
-        # is drawn wide and the rest ride on top of it; otherwise the overlap reads as a
-        # missing curve rather than as the point of the panel.
-        lw = 4.5 if i == 0 else 2.0
-        for key, ramp, ls, name in (('I_1p', RAMP_1PHOTON, '-', '1-photon'),
-                                    ('I_2p', RAMP_2PHOTON, '--', '2-photon')):
+    # Beams outer, Rabi inner: with a 3-column legend (filled column-major) each beam
+    # then gets its own column, with its Rabi frequencies stacked underneath it.
+    for key, color, name, _short in BEAMS:
+        for i, run in enumerate(runs):
+            fR = run['f_Rabi']
+            ls, lw = RABI_STYLES[i % len(RABI_STYLES)]
             y = np.asarray(run[key])
             lab = rf'{name}, $\Omega/2\pi={fR:g}$ MHz'
-            ax_n.plot(x, y, color=ramp[s], lw=lw, ls=ls, zorder=3, label=lab)
+            ax_n.plot(x, y, color=color, lw=lw, ls=ls, zorder=3, label=lab)
             # Same data, x rescaled to absolute MHz. Drop x=0, which a log axis cannot show.
-            ax_a.plot(x[1:] * fR, y[1:], color=ramp[s], lw=lw, ls=ls, zorder=3, label=lab)
+            ax_a.plot(x[1:] * fR, y[1:], color=color, lw=lw, ls=ls, zorder=3, label=lab)
 
     ax_n.set_xlim(0, x.max())
     ax_n.set_xlabel(r'Normalized noise frequency  $2\pi f/\Omega$')
     ax_n.set_title('(a)  Universal filter shape', loc='left', color=INK,
                    fontsize=11, fontweight='bold')
-    ax_n.annotate('the two Rabi frequencies collapse:\nthe filter is set by the pulse, '
-                  'not by\nthe absolute frequency',
-                  xy=(0.03, 0.05), xycoords='axes fraction', ha='left', va='bottom',
+    # -3 dB point of each beam, from the lowest-Rabi run (they agree across runs). The
+    # dotted verticals sit in the empty band between the arm-2 curve and the other two;
+    # the values are quoted in the annotation rather than labelled on the axis, which
+    # would collide with the panel title.
+    cuts = []
+    for key, color, _name, short in BEAMS:
+        xh = _half_power(x, np.asarray(runs[0][key]))
+        if np.isfinite(xh):
+            ax_n.axvline(xh, color=color, lw=1.0, ls=(0, (1, 2)), zorder=2)
+            cuts.append((xh, short))
+    cuts.sort()
+
+    ax_n.annotate('the two Rabi frequencies collapse — the filter is\n'
+                  'set by the pulse, not the absolute frequency.\n'
+                  'The three beams do not: each has its own width.\n'
+                  + r'$-3$ dB at $2\pi f/\Omega$ = '
+                  + ', '.join(f'{v:.2f} ({nm})' for v, nm in cuts),
+                  xy=(0.03, 0.74), xycoords='axes fraction', ha='left', va='top',
                   fontsize=8, color=MUTED, style='italic')
 
     ax_a.set_xscale('log')
@@ -204,16 +243,14 @@ def make_figure(data, cfg, path):
                   fontsize=8, color=MUTED, style='italic')
 
     handles, labels = ax_n.get_legend_handles_labels()
-    order = sorted(range(len(labels)), key=lambda i: ('2-photon' in labels[i], labels[i]))
-    fig.legend([handles[i] for i in order], [labels[i] for i in order],
-               ncol=len(runs) * 2, fontsize=8.5, frameon=False, labelcolor=MUTED,
-               loc='lower center', bbox_to_anchor=(0.5, -0.015), handlelength=2.4,
-               columnspacing=1.8)
+    fig.legend(handles, labels, ncol=len(BEAMS), fontsize=8.5, frameon=False,
+               labelcolor=MUTED, loc='lower center', bbox_to_anchor=(0.5, -0.02),
+               handlelength=2.6, columnspacing=2.2)
 
     sub = (rf"Cs, $n={cfg['n']}$, $d={cfg['atom_d']}\,\mu$m  |  "
            rf"1-photon $n$P$_{{3/2}}$ ($B/2\pi={data['blockade_1p_MHz']:.0f}$ MHz), "
            rf"2-photon $n$S$_{{1/2}}$ ($B/2\pi={data['blockade_2p_MHz']:.0f}$ MHz, "
-           rf"$\Delta/2\pi={cfg['inter_detuning'] / 2 / np.pi / 1e3:.0f}$ GHz, both arms)  |  "
+           rf"$\Delta/2\pi={cfg['inter_detuning'] / 2 / np.pi / 1e3:.0f}$ GHz, per beam)  |  "
            rf"time-optimal CZ, $\Omega T={cfg['pulse_time']:g}$")
     fig.suptitle('Intensity-noise response vs noise frequency', x=0.008, y=1.0,
                  ha='left', va='top', fontsize=13, fontweight='bold', color=INK)
