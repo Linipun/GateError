@@ -28,29 +28,40 @@ roll-off would suggest.
 One curve per independently-noisy beam
 --------------------------------------
 The two 2-photon arms are NOT plotted as a single total, because they are not the
-same filter. In units of 2 pi f / Omega the -3 dB points are
+same filter. In units of 2 pi f / Omega the -3 dB points, at the default
+Delta/2pi = 10 GHz, are
 
-    2-photon arm 1 (459 nm)  : 0.48    <- narrowest
-    1-photon       (319 nm)  : 0.80
+    2-photon arm 1 (459 nm)  : 0.55    <- narrowest
+    1-photon       (319 nm)  : 0.82
     2-photon arm 2 (1038 nm) : 1.63    <- widest
 
 so arm 1 is actually a tighter filter than the 1-photon gate, while arm 2 is twice
-as wide. Arm 2 also carries ~80x arm 1's DC response (its polarizability shifts
-|1>, making its RIN a detuning error rather than an amplitude one), so it both
-dominates the total and integrates over the widest band -- which is why a total
-would have looked like "the 2-photon curve" and hidden the fact that the 459 nm arm
-is the best-behaved beam of the three. Summing them is only correct when both arms
-carry the same RIN; with per-arm noise levels, weight each curve separately.
+as wide. Arm 2 also carries a few hundred times arm 1's DC response, because its
+polarizability shifts |1> and so its RIN is a detuning error rather than an
+amplitude one. It therefore both dominates the total and integrates over the widest
+band -- which is why a total would have looked like "the 2-photon curve" and hidden
+the fact that the 459 nm arm is the best-behaved beam of the three. Summing them is
+only correct when both arms carry the same RIN; with per-arm noise levels, weight
+each curve separately.
+
+Arm 2's DC response scales as Delta^2: the arms run at Omega_j = sqrt(2 Omega Delta),
+so its light shift ~ ktilde_r,2 * Omega_2^2 grows linearly in Delta and the response
+goes as its square. Raising Delta to suppress intermediate-state scattering costs
+RIN sensitivity at exactly that rate (I_I(0) ~ 133 at 5 GHz, ~547 at 10 GHz).
 
 Panels
 ------
   (a) vs normalized noise frequency 2 pi f / Omega -- the universal filter shape.
       The 2 and 20 MHz curves nearly collapse here, which is the point: the filter
       is set by the pulse, not by the absolute frequency.
-  (b) vs absolute noise frequency f [MHz], log axis -- where the roll-off actually
-      lands in the lab, i.e. which part of a measured RIN spectrum the gate is
-      sensitive to. This is the same data as (a) with the x-axis rescaled by
-      f_Rabi, so no extra computation.
+  (b) vs absolute noise frequency f [MHz] -- where the roll-off actually lands in
+      the lab, i.e. which part of a measured RIN spectrum the gate is sensitive to.
+      Every curve spans the same 0 .. x_max * max(f_Rabi) here, so the gates are
+      compared over one common band rather than each stopping at its own x_max.
+      That costs the slower gates extra high-frequency points (see `spectrum`), and
+      it is why they show many interference lobes across the panel: the lobes are
+      spaced 2 pi / (Omega T) ~ 0.82 in 2 pi f / Omega, which is ~1.6 MHz for a
+      2 MHz gate but ~16 MHz for a 20 MHz one.
 
 Curves are one per independently-noisy beam -- the 1-photon gate's 319 nm beam and
 each of the two 2-photon arms separately -- so nothing is pre-summed and the three
@@ -62,8 +73,10 @@ Units, following the two linear_response modules
   frequency passed to response_G13 is the dimensionless 2 pi f / Omega.
 * 2-photon: linear_response_2photon works in REAL time (us), so response_2photon
   takes omega in rad/us, i.e. 2 pi f with f in MHz.
-Both are driven from the same normalized grid x = 2 pi f / Omega, so the two gates
-are always compared at the same noise frequency.
+Both are driven from the same per-run ABSOLUTE frequency grid f_abs, converted into
+each module's own convention, so the gates are always compared at the same physical
+noise frequency. The sweeps use response_G13_spectrum / response_2photon_spectrum,
+which build the Eq.-(G13) kernel once and contract it against every frequency.
 
 Usage
 -----
@@ -81,9 +94,9 @@ import matplotlib.pyplot as plt
 from arc import Caesium, Rubidium
 
 from budget_monte_carlo import find_blockade_Mrad
-from linear_response import build_Oseq, response_G13, isometry_haar_full
-from linear_response_2photon import (build_Oseq_2photon, response_2photon, compute_ktildes,
-                                     O2photon_I1, O2photon_I2)
+from linear_response import build_Oseq, response_G13_spectrum, isometry_haar_full
+from linear_response_2photon import (build_Oseq_2photon, response_2photon_spectrum,
+                                     compute_ktildes, O2photon_I1, O2photon_I2)
 from budget_noise_response_scan import (make_blockade_2photon, optimal_phase,
                                         RAMP_1PHOTON, RAMP_2PHOTON, INK, MUTED, GRID)
 
@@ -108,20 +121,38 @@ def spectrum(cfg):
     Delta = cfg['inter_detuning']
     _, ktr_1, _, ktr_2 = compute_ktildes(n, Delta, Delta)
 
-    # x = 2 pi f / Omega: the noise frequency in units of the Rabi frequency. Driving
-    # both gates from this shared grid keeps them at the same physical f at every point.
-    x = np.linspace(0.0, cfg['x_max'], cfg['x_num'])
+    # Every run is computed on its OWN absolute-frequency grid, the union of two:
+    #   * a fine grid in normalized units, 0 .. x_max in x_num steps, which is what
+    #     panel (a) needs -- a shared normalized grid would leave a slow gate with only
+    #     a handful of points there once the grid is stretched to cover panel (b);
+    #   * the common absolute grid 0 .. f_max_abs, so that in panel (b) every curve
+    #     spans the same x range instead of stopping at x_max * its own f_Rabi.
+    # f_max_abs is set by the fastest gate, so that run's two grids coincide and it
+    # costs nothing extra; only the slower runs get the extra high-frequency points.
+    f_max_abs = cfg['x_max'] * max(cfg['f_rabis'])
+    # The common grid is densified by the same factor it is stretched, so the SLOWEST
+    # gate keeps its normalized resolution all the way out. Without this the response's
+    # interference lobes -- spaced 2 pi / (Omega T) ~ 0.82 in 2 pi f / Omega, i.e. only
+    # ~1.6 MHz apart for a 2 MHz gate -- are aliased into a fuzzy band across the
+    # extended tail. Evaluation is a single matrix product, so the extra points are free.
+    stretch = f_max_abs / (cfg['x_max'] * min(cfg['f_rabis']))
+    n_common = min(int(cfg['x_num'] * stretch), 6001)
+    f_common = np.linspace(0.0, f_max_abs, n_common)
     runs = []
 
     for f_Rabi in cfg['f_rabis']:
         Omega = 2 * np.pi * f_Rabi
         print(f"  Omega/2pi = {f_Rabi:g} MHz ...", end="", flush=True)
 
+        f_abs = np.unique(np.concatenate([np.linspace(0.0, cfg['x_max'] * f_Rabi,
+                                                      cfg['x_num']), f_common]))
+        x = f_abs / f_Rabi                  # = 2 pi f / Omega, this run's normalized axis
+
         # ---- 1-photon: normalized units, so x is passed straight through ----
         phase, dt, TO_1p, _ = optimal_phase(Omega, B_1p, cfg['pulse_time'],
                                             cfg['resolution'], tau_1p)
         o_I = build_Oseq(phases=phase, dt=dt, B=B_1p / Omega, is_intensity=True)
-        I_1p = np.array([response_G13(o_I, S_haar, w, dt=dt) for w in x])
+        I_1p = response_G13_spectrum(o_I, S_haar, x, dt=dt)
 
         # ---- 2-photon: real units, so x must be converted to rad/us ----
         phase2, dt2, TO_2p, _ = optimal_phase(Omega, B_2p, cfg['pulse_time'],
@@ -133,11 +164,12 @@ def spectrum(cfg):
                   delta1=delta1, delta2=0.0, Delta=Delta, inter_detuning=Delta, n=n)
         oseq_I1 = build_Oseq_2photon(Oinst_func=O2photon_I1, **kw)
         oseq_I2 = build_Oseq_2photon(Oinst_func=O2photon_I2, **kw)
-        w_real = x * Omega                                  # rad/us
-        I1_2p = np.array([response_2photon(oseq_I1, S_haar, w, dt_real) for w in w_real])
-        I2_2p = np.array([response_2photon(oseq_I2, S_haar, w, dt_real) for w in w_real])
+        w_real = 2 * np.pi * f_abs                          # rad/us (== x * Omega)
+        I1_2p = response_2photon_spectrum(oseq_I1, S_haar, w_real, dt_real)
+        I2_2p = response_2photon_spectrum(oseq_I2, S_haar, w_real, dt_real)
 
         runs.append(dict(f_Rabi=float(f_Rabi), TO_1p=float(TO_1p), TO_2p=float(TO_2p),
+                         f_abs=f_abs.tolist(),
                          I_1p=I_1p.tolist(), I1_2p=I1_2p.tolist(), I2_2p=I2_2p.tolist(),
                          I_2p=(I1_2p + I2_2p).tolist()))
         print(f"\n      1-photon      : I_I(0) = {I_1p[0]:9.3f}   -3dB at 2pi f/Omega = "
@@ -147,7 +179,7 @@ def spectrum(cfg):
         print(f"      2p arm2 (1038): I_I(0) = {I2_2p[0]:9.3f}   -3dB at 2pi f/Omega = "
               f"{_half_power(x, I2_2p):.2f}")
 
-    return dict(x=x.tolist(), runs=runs,
+    return dict(f_max_abs=float(f_max_abs), x_max=float(cfg['x_max']), runs=runs,
                 blockade_1p_MHz=B_1p / 2 / np.pi, blockade_2p_MHz=B_2p / 2 / np.pi)
 
 
@@ -179,8 +211,9 @@ RABI_STYLES = [('-', 4.5), ('--', 2.0), (':', 2.0), ('-.', 2.0)]
 
 
 def make_figure(data, cfg, path):
-    x = np.asarray(data['x'])
     runs = data['runs']
+    x_max = data.get('x_max', cfg['x_max'])
+    f_max_abs = data.get('f_max_abs', x_max * max(r['f_Rabi'] for r in runs))
 
     fig, axes = plt.subplots(1, 2, figsize=(11.0, 5.2))
     ax_n, ax_a = axes
@@ -203,13 +236,16 @@ def make_figure(data, cfg, path):
         for i, run in enumerate(runs):
             fR = run['f_Rabi']
             ls, lw = RABI_STYLES[i % len(RABI_STYLES)]
+            f_abs = np.asarray(run['f_abs'])
             y = np.asarray(run[key])
             lab = rf'{name}, $\Omega/2\pi={fR:g}$ MHz'
-            ax_n.plot(x, y, color=color, lw=lw, ls=ls, zorder=3, label=lab)
-            # Same data, x rescaled to absolute MHz. Drop x=0, which a log axis cannot show.
-            ax_a.plot(x[1:] * fR, y[1:], color=color, lw=lw, ls=ls, zorder=3, label=lab)
+            # (a) this run's own normalized axis; (b) the shared absolute one. Both are
+            # the same data -- panel (a) is just clipped by set_xlim to x_max, while the
+            # slower runs carry points beyond it so that panel (b) reaches f_max_abs.
+            ax_n.plot(f_abs / fR, y, color=color, lw=lw, ls=ls, zorder=3, label=lab)
+            ax_a.plot(f_abs, y, color=color, lw=lw, ls=ls, zorder=3, label=lab)
 
-    ax_n.set_xlim(0, x.max())
+    ax_n.set_xlim(0, x_max)
     ax_n.set_xlabel(r'Normalized noise frequency  $2\pi f/\Omega$')
     ax_n.set_title('(a)  Universal filter shape', loc='left', color=INK,
                    fontsize=11, fontweight='bold')
@@ -218,43 +254,45 @@ def make_figure(data, cfg, path):
     # the values are quoted in the annotation rather than labelled on the axis, which
     # would collide with the panel title.
     cuts = []
+    x0 = np.asarray(runs[0]['f_abs']) / runs[0]['f_Rabi']
     for key, color, _name, short in BEAMS:
-        xh = _half_power(x, np.asarray(runs[0][key]))
+        xh = _half_power(x0, np.asarray(runs[0][key]))
         if np.isfinite(xh):
             ax_n.axvline(xh, color=color, lw=1.0, ls=(0, (1, 2)), zorder=2)
             cuts.append((xh, short))
     cuts.sort()
 
-    ax_n.annotate('the two Rabi frequencies collapse — the filter is\n'
-                  'set by the pulse, not the absolute frequency.\n'
-                  'The three beams do not: each has its own width.\n'
-                  + r'$-3$ dB at $2\pi f/\Omega$ = '
-                  + ', '.join(f'{v:.2f} ({nm})' for v, nm in cuts),
-                  xy=(0.03, 0.74), xycoords='axes fraction', ha='left', va='top',
-                  fontsize=8, color=MUTED, style='italic')
+    # ax_n.annotate('the two Rabi frequencies collapse — the filter is\n'
+    #               'set by the pulse, not the absolute frequency.\n'
+    #               'The three beams do not: each has its own width.\n'
+    #               + r'$-3$ dB at $2\pi f/\Omega$ = '
+    #               + ', '.join(f'{v:.2f} ({nm})' for v, nm in cuts),
+    #               xy=(0.03, 0.74), xycoords='axes fraction', ha='left', va='top',
+    #               fontsize=8, color=MUTED, style='italic')
 
-    ax_a.set_xscale('log')
+    # ax_a.set_xscale('log')
+    ax_a.set_xlim(0, f_max_abs)         # every curve now spans this full range
     ax_a.set_xlabel(r'Noise frequency  $f$  [MHz]')
     ax_a.set_title('(b)  Same curves vs absolute noise frequency', loc='left', color=INK,
                    fontsize=11, fontweight='bold')
-    ax_a.annotate('a faster gate pushes the roll-off out,\nso it integrates RIN over '
-                  'a wider band',
-                  xy=(0.03, 0.05), xycoords='axes fraction', ha='left', va='bottom',
-                  fontsize=8, color=MUTED, style='italic')
+    # ax_a.annotate('a faster gate pushes the roll-off out,\nso it integrates RIN over '
+    #               'a wider band',
+    #               xy=(0.03, 0.05), xycoords='axes fraction', ha='left', va='bottom',
+    #               fontsize=8, color=MUTED, style='italic')
 
     handles, labels = ax_n.get_legend_handles_labels()
     fig.legend(handles, labels, ncol=len(BEAMS), fontsize=8.5, frameon=False,
                labelcolor=MUTED, loc='lower center', bbox_to_anchor=(0.5, -0.02),
                handlelength=2.6, columnspacing=2.2)
 
-    sub = (rf"Cs, $n={cfg['n']}$, $d={cfg['atom_d']}\,\mu$m  |  "
-           rf"1-photon $n$P$_{{3/2}}$ ($B/2\pi={data['blockade_1p_MHz']:.0f}$ MHz), "
-           rf"2-photon $n$S$_{{1/2}}$ ($B/2\pi={data['blockade_2p_MHz']:.0f}$ MHz, "
-           rf"$\Delta/2\pi={cfg['inter_detuning'] / 2 / np.pi / 1e3:.0f}$ GHz, per beam)  |  "
-           rf"time-optimal CZ, $\Omega T={cfg['pulse_time']:g}$")
+    # sub = (rf"Cs, $n={cfg['n']}$, $d={cfg['atom_d']}\,\mu$m  |  "
+    #        rf"1-photon $n$P$_{{3/2}}$ ($B/2\pi={data['blockade_1p_MHz']:.0f}$ MHz), "
+    #        rf"2-photon $n$S$_{{1/2}}$ ($B/2\pi={data['blockade_2p_MHz']:.0f}$ MHz, "
+    #        rf"$\Delta/2\pi={cfg['inter_detuning'] / 2 / np.pi / 1e3:.0f}$ GHz, per beam)  |  "
+    #        rf"time-optimal CZ, $\Omega T={cfg['pulse_time']:g}$")
     fig.suptitle('Intensity-noise response vs noise frequency', x=0.008, y=1.0,
                  ha='left', va='top', fontsize=13, fontweight='bold', color=INK)
-    fig.text(0.008, 0.95, sub, ha='left', va='top', fontsize=8.5, color=MUTED)
+    # fig.text(0.008, 0.95, sub, ha='left', va='top', fontsize=8.5, color=MUTED)
     fig.tight_layout(rect=(0, 0.05, 1, 0.92))
     for ext in ('pdf', 'png'):
         fig.savefig(f'{path}.{ext}', dpi=200, bbox_inches='tight', facecolor='white')
@@ -273,10 +311,17 @@ def main():
     p.add_argument('--x-max', type=float, default=3.0,
                    help='max normalized noise frequency 2 pi f / Omega')
     p.add_argument('--x-num', type=int, default=301, help='noise-frequency grid points')
-    p.add_argument('--inter-detuning', type=float, default=5000.0,
+    p.add_argument('--inter-detuning', type=float, default=10000.0,
                    help='2-photon intermediate-state detuning Delta/2pi [MHz]')
     p.add_argument('--pulse-time', type=float, default=7.65, help='gate duration in 1/Omega')
-    p.add_argument('--resolution', type=int, default=200, help='phase-profile time steps')
+    # 1000, not the 200 the other budget scripts use. The extended panel (b) reaches
+    # 2 pi f / Omega ~ 30 for the slowest gate, and the kernel's rectangle rule needs
+    # omega*dt << 1 there. Measured against a resolution-4000 reference: through the
+    # knee (x <~ 3) both 200 and 1000 are fine (<0.1%), but in the deep tail 200 is off
+    # by ~60% at x = 30 while 1000 holds to a few % -- where the response is already
+    # four decades below DC, so a few % is immaterial. Affordable only because
+    # response_*_spectrum builds the O(Nt^2) kernel once per curve instead of per point.
+    p.add_argument('--resolution', type=int, default=1000, help='phase-profile time steps')
     p.add_argument('--outdir', default='result')
     p.add_argument('--load', default=None, help='replot from a saved JSON')
     a = p.parse_args()

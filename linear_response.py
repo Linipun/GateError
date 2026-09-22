@@ -142,9 +142,11 @@ def isometry_symmetric() -> np.ndarray:
     S[idx["11"], 2] = 1.0
     return S
 
-def response_G13(Oseq: np.ndarray, S: np.ndarray, omegas_noise: float, dt: float) -> np.ndarray:
+def response_kernel_G13(Oseq: np.ndarray, S: np.ndarray, dt: float):
     """
-    Computes the universal response I(ω) for ω in omegas using Eq. (G13)
+    Builds the Eq.-(G13) kernel K(tau); response_G13 contracts it with cos(omega tau).
+
+    Originally the body of response_G13 I(ω) for ω in omegas using Eq. (G13)
     with an isometry S (dim x D) defining the Haar ensemble subspace.
       P = S S†  (projector), D = Tr(P)
 
@@ -192,9 +194,26 @@ def response_G13(Oseq: np.ndarray, S: np.ndarray, omegas_noise: float, dt: float
 
     lags = np.arange(-(Nt_local - 1), Nt_local)
     tau = lags * dt
+    return K, tau
 
-    # I(ω) = Σ_k K(k) cos(ω tau_k)
+
+def response_G13(Oseq: np.ndarray, S: np.ndarray, omegas_noise: float, dt: float) -> np.ndarray:
+    """I(omega) for a single noise frequency.  I(w) = sum_k K(k) cos(w tau_k)."""
+    K, tau = response_kernel_G13(Oseq, S, dt)
     return np.sum(K * np.cos(omegas_noise * tau))
+
+
+def response_G13_spectrum(Oseq: np.ndarray, S: np.ndarray, omegas, dt: float) -> np.ndarray:
+    """I(omega) for many noise frequencies at once.
+
+    The Eq.-(G13) kernel K(tau) does not depend on omega -- only the final cosine sum
+    does -- so a frequency sweep can build K once and contract it against every omega,
+    instead of rebuilding the O(Nt^2) lag correlations per point. Identical results to
+    calling response_G13 in a loop, but fast enough to afford the fine time grid that
+    high noise frequencies need (the rectangle rule wants omega*dt << 1).
+    """
+    K, tau = response_kernel_G13(Oseq, S, dt)
+    return np.cos(np.outer(np.asarray(omegas, dtype=float), tau)) @ K
 
 
 # -----------------------------

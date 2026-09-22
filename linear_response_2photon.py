@@ -102,9 +102,10 @@ def O2photon_nu2(phase, Omega1,Omega2, Delta, ktilde0_1, ktilder_1, ktilde0_2, k
     return O2photon_nu1(phase, Omega1,Omega2, Delta, ktilde0_1, ktilder_1, ktilde0_2, ktilder_2)
 
 
-def response_2photon(Oseq, S, omega_noise, dt):
+def response_kernel_2photon(Oseq, S, dt):
     """
-    Eq. (G13) Haar-average implemented via lag correlations (fast O(Nt log Nt)-ish).
+    Eq. (G13) Haar-average kernel K(tau), via lag correlations. Was the body of
+    response_2photon; split out so a frequency sweep builds it once.
     """
     Nt_local = Oseq.shape[0]
     D = S.shape[1]
@@ -132,7 +133,19 @@ def response_2photon(Oseq, S, omega_noise, dt):
 
     lags = np.arange(-(Nt_local-1), Nt_local)
     tau = lags * dt
+    return K, tau
+
+
+def response_2photon(Oseq, S, omega_noise, dt):
+    """I(omega) for a single noise frequency."""
+    K, tau = response_kernel_2photon(Oseq, S, dt)
     return np.sum(K * np.cos(omega_noise*tau))
+
+
+def response_2photon_spectrum(Oseq, S, omegas, dt):
+    """I(omega) for many noise frequencies at once; see response_G13_spectrum."""
+    K, tau = response_kernel_2photon(Oseq, S, dt)
+    return np.cos(np.outer(np.asarray(omegas, dtype=float), tau)) @ K
 
 def step_unitary_2photon(H, dt_):
     evals, evecs = np.linalg.eigh(H)
