@@ -1,0 +1,39 @@
+# HTCondor (CHTC) submit file: one job per principal quantum number n.
+# Put this file, run_blockade.sh and blockade_asymmetric.py in ONE directory, then:
+#   mkdir -p logs blockade_asym_out
+#   condor_submit blockade_asym.sub
+# then, when all jobs are done:
+#   python blockade_asymmetric.py --merge blockade_asym_out --output blockades_asymmetric_p.pkl
+#
+# Edit ATOM / M1 / M2 / the n list below. Default: Cs nP3/2, mj=1/2 + mj=3/2, n=40..99
+# (same n range as blockades_symmetric_p.pkl).
+
+ATOM = Cs
+M1   = 0.5
+M2   = 1.5
+
+universe        = container
+container_image = docker://python:3.11
+
+executable      = run_blockade.sh
+arguments       = $(n) --atom $(ATOM) --m1 $(M1) --m2 $(M2) --conv --outdir .
+transfer_input_files = blockade_asymmetric.py
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+
+# the output file name follows blockade_asymmetric.py: <atom>_n<n>_m<m1>_<m2>.pkl
+OUTFILE = $(ATOM)_n$(n)_m$(M1)_$(M2).pkl
+transfer_output_files   = $(OUTFILE)
+transfer_output_remaps  = "$(OUTFILE) = blockade_asym_out/$(OUTFILE)"
+
+log    = logs/blockade_$(n).log
+output = logs/blockade_$(n).out
+error  = logs/blockade_$(n).err
+
+# --conv basis (nrange 6, lmax 5, 37.5 GHz) is ~7000 states: ~10 min, <4 GB at n=70.
+# Higher n has a denser manifold, so leave headroom.
+request_cpus   = 1
+request_memory = 6GB
+request_disk   = 4GB
+
+queue n from seq 40 99 |
